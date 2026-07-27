@@ -35,6 +35,10 @@ match /lessonViews/{id} {
   allow write: if false;
 }
 
+match /studentLogins/{id} {
+  allow read, write: if false;        // sign-in alias - Admin SDK only
+}
+
 match /jdAuditLogs/{id} {
   allow read: if isSchoolAdmin(resource.data.schoolId);
   allow create: if false;             // Admin SDK only

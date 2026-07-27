@@ -40,6 +40,15 @@ export default async function TutorDashboard() {
         )}
       </div>
 
+      {classes.length > 0 && (
+        <Link
+          href="/tutor/sign-ins"
+          className="mt-4 inline-block text-sm text-marker underline"
+        >
+          Student sign-ins
+        </Link>
+      )}
+
       {classes.length === 0 && (
         <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
           {session.isAdmin

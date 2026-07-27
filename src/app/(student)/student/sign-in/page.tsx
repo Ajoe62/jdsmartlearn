@@ -1,88 +1,37 @@
-"use client";
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { wipeDevice } from "@/lib/offline/wipe";
+import { getRememberedSchoolId } from "@/lib/auth/student";
+import { getSchoolDirectory } from "@/lib/db/resultpeak";
+import SignInForm from "./SignInForm";
 
-/** Students sign in with their ID and access code - no email, no app. */
-export default function StudentSignIn() {
-  const router = useRouter();
-  const params = useSearchParams();
-  const [studentId, setStudentId] = useState("");
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+/**
+ * Students sign in with the username their teacher gave them (`jss3-04`) and
+ * their access code. The school is picked once and remembered on the phone,
+ * because a username is only unique inside a school.
+ *
+ * The school list is server-rendered so the form ships almost no JavaScript -
+ * this page loads on a throttled 3G connection.
+ */
+export default async function StudentSignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ expired?: string; school?: string }>;
+}) {
+  const params = await searchParams;
+  const [schools, remembered] = await Promise.all([
+    getSchoolDirectory(),
+    getRememberedSchoolId(),
+  ]);
 
-  /**
-   * Arriving here means no valid session, so nothing saved on this phone is
-   * usable any more - the grace window closed, the account was deactivated, or
-   * someone signed out. Clear it now rather than at the next sign-in, so a phone
-   * left on this screen is not holding a previous student's lessons.
-   */
-  const expired = params.get("expired") === "1";
-  useEffect(() => {
-    void wipeDevice();
-  }, []);
-
-  async function signIn() {
-    setBusy(true);
-    setError(null);
-    const res = await fetch("/api/student/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ studentId, code }),
-    });
-    if (res.ok) {
-      router.push("/student");
-    } else {
-      const body = await res.json().catch(() => ({}));
-      setError(body.error ?? "That ID and code don't match.");
-      setBusy(false);
-    }
-  }
+  // ?school=change re-opens the picker on a phone that already remembers one.
+  const chosen =
+    params.school === "change"
+      ? null
+      : (schools.find((s) => s.id === remembered) ?? null);
 
   return (
-    <main className="mx-auto max-w-sm px-5 py-16">
-      <h1 className="text-2xl font-semibold">Open your lessons</h1>
-      <p className="mt-2 text-sm text-slate">Your teacher gives you these.</p>
-
-      {expired && (
-        <p className="mt-4 rounded-lg border border-line bg-paper px-3 py-2 text-sm text-slate">
-          Sign in again to read your lessons. You&rsquo;ll need internet once.
-        </p>
-      )}
-
-      <div className="mt-8 space-y-4">
-        <label className="block">
-          <span className="text-sm font-medium">Student ID</span>
-          <input
-            value={studentId}
-            onChange={(e) => setStudentId(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-sm font-medium">Code</span>
-          <input
-            inputMode="numeric"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2 text-lg tracking-widest"
-          />
-        </label>
-
-        {error && (
-          <p className="rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
-        )}
-
-        <button
-          onClick={signIn}
-          disabled={busy || !studentId || !code}
-          className="w-full rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
-        >
-          {busy ? "Opening…" : "Open my lessons"}
-        </button>
-      </div>
-    </main>
+    <SignInForm
+      schools={schools}
+      chosen={chosen}
+      expired={params.expired === "1"}
+    />
   );
 }

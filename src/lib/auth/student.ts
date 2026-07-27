@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import { adminDb } from "@/lib/firebase/admin";
 import { RP } from "@/lib/db/collections";
+import { resolveUsername } from "@/lib/db/student-logins";
 import { safeEqual } from "./compare";
 import type { ResultPeakStudent } from "@/types";
 
@@ -23,6 +24,21 @@ const COOKIE = "jd_student";
  * on reconnect is what makes offline reading revocable.
  */
 const REFRESH_COOKIE = "jd_student_r";
+/**
+ * Which school this phone belongs to. Not a credential - it only skips the
+ * picker, because a username like `jss3-04` is unique per school. Survives
+ * sign-out on purpose: the next child at the same school shouldn't pick again.
+ * The username is deliberately NOT remembered - phones are shared.
+ */
+export const SCHOOL_COOKIE = "jd_school";
+
+export const schoolCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+  maxAge: 365 * 24 * 60 * 60,
+});
 const secret = () => new TextEncoder().encode(process.env.STUDENT_SESSION_SECRET!);
 
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
@@ -41,6 +57,35 @@ export type RefreshOutcome =
   | { status: "ok"; session: StudentSession; classChanged: boolean }
   | { status: "revoked" }
   | { status: "no-token" };
+
+/**
+ * Turn what a student typed into a studentId.
+ *
+ * Students sign in with a username their teacher gave them (`jss3-04`), which
+ * is a JDSmartLearn alias for the ResultPeak document id. The raw document id
+ * still works: it is what everyone used before usernames existed, and a school
+ * mid-rollout will have both in circulation.
+ *
+ * Resolution only - it proves nothing. The access code is still checked by
+ * verifyStudentCode, and the school is re-asserted by the caller.
+ */
+export async function resolveStudentIdentifier(
+  schoolId: string | null,
+  identifier: string
+): Promise<string | null> {
+  const typed = identifier.trim();
+  if (!typed) return null;
+
+  if (schoolId) {
+    const byUsername = await resolveUsername(schoolId, typed);
+    if (byUsername) return byUsername;
+  }
+
+  // Legacy: the input may be a raw student document id. Reject anything that
+  // isn't a legal one - `a/b` would build a malformed path and throw.
+  if (typed.includes("/") || typed === "." || typed === ".." || typed.length > 200) return null;
+  return typed;
+}
 
 export async function verifyStudentCode(
   studentId: string,
@@ -133,6 +178,18 @@ export async function refreshStudentSession(): Promise<RefreshOutcome> {
   await createStudentSession(session);
 
   return { status: "ok", session, classChanged };
+}
+
+export async function rememberSchool(schoolId: string): Promise<void> {
+  (await cookies()).set(SCHOOL_COOKIE, schoolId, schoolCookieOptions());
+}
+
+export async function getRememberedSchoolId(): Promise<string | null> {
+  return (await cookies()).get(SCHOOL_COOKIE)?.value ?? null;
+}
+
+export async function forgetSchool(): Promise<void> {
+  (await cookies()).delete(SCHOOL_COOKIE);
 }
 
 export async function clearStudentSession(): Promise<void> {

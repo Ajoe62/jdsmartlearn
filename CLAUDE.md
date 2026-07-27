@@ -15,7 +15,7 @@ Everything else is out of scope. If a feature does not make that loop faster or 
 ## Who uses it
 
 - **Tutors (teachers)** — non-technical, 4–8 subjects each, mid-range Android phones. Must reach first publish in under 30 minutes with no training.
-- **Students** — Primary 1 to SS3. Log in with school + student ID + access code. No email, no app.
+- **Students** — Primary 1 to SS3. Log in with school + username (`jss3-04`) + access code. No email, no app. The school is picked once and remembered on the phone; the username never is, because phones are shared.
 - **Admins** — school admins, already managing rosters in ResultPeak.
 
 Design for a 360px screen on a throttled 3G connection first. Server-render wherever possible; keep client JS minimal on student pages.
@@ -34,7 +34,13 @@ Never create, update, or delete a document in any of them. Never build roster CR
 
 ### Collections JDSmartLearn owns — read and write
 
-`topics`, `lessons`, `generatedContent`, `lessonViews`, `jdAuditLogs`
+`topics`, `lessons`, `generatedContent`, `lessonViews`, `jdAuditLogs`, `studentLogins`
+
+`studentLogins` is a **credential alias only**: `{schoolId}_{username}` → `studentId`, so a
+child types `jss3-04` instead of a 20-character document id. It is not a second student
+registry — no names, no personal data, not authoritative, regenerable from scratch. The
+username is derived from the *class*, never the child. ResultPeak still owns the student
+record and the access code, so deactivating a student there still locks them out.
 
 Follow ResultPeak's existing conventions exactly:
 - Flat top-level collections, never nested under `/schools/{id}/...`
@@ -91,7 +97,7 @@ Offline-first is in scope for the student reader. The network in the schools usi
 - **Never auto-generate after a flush.** Generation spends the daily cap, and teacher review before publish is mandatory. A flushed create lands as a draft and waits for the tutor.
 - **Never drop a teacher's work silently.** A 4xx is terminal and must surface with the server's own message plus a discard action; a 5xx or network error is retried.
 - Writes queued offline carry `baseUpdatedAt`. Routes that patch or publish return **409** when the lesson moved on, so a days-old edit cannot clobber a newer version.
-- Only `/tutor` and `/tutor/lessons/new` may be cached by the service worker. **`/tutor/lessons/[id]` renders the marking guide and must stay network-only.**
+- Only `/tutor` and `/tutor/lessons/new` may be cached by the service worker. **`/tutor/lessons/[id]` renders the marking guide and `/tutor/sign-ins` renders live access codes — both must stay network-only.**
 
 ---
 

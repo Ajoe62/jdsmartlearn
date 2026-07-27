@@ -21,6 +21,12 @@ export const JD = {
   generatedContent: "generatedContent",
   lessonViews: "lessonViews",
   auditLogs: "jdAuditLogs",
+  /**
+   * Credential alias only: username -> studentId, so a child types `jss3-04`
+   * instead of a 20-character document id. Holds no personal data and is not a
+   * roster - ResultPeak still owns the student and the access code.
+   */
+  studentLogins: "studentLogins",
 } as const;
 
 export const RESULTPEAK_OWNED = new Set<string>([

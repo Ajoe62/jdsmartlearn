@@ -16,13 +16,13 @@ export default function Home() {
           href="/tutor"
           className="rounded-lg bg-marker px-5 py-3 text-center font-medium text-chalk"
         >
-          I'm a teacher
+          I&rsquo;m a teacher
         </Link>
         <Link
           href="/student"
           className="rounded-lg border border-line bg-chalk px-5 py-3 text-center font-medium"
         >
-          I'm a student
+          I&rsquo;m a student
         </Link>
       </div>
     </main>

@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
 import { RP, QUERY_LIMIT } from "./collections";
 import type { ResultPeakClass, ResultPeakSchool, ResultPeakStudent } from "@/types";
@@ -50,6 +51,59 @@ export async function getTutorNames(schoolId: string): Promise<Map<string, strin
     if (name) names.set(d.id, name);
   }
   return names;
+}
+
+export interface SchoolListing {
+  id: string;
+  name: string;
+  /** URL form of the name, for the /s/{slug} link a school puts on the board. */
+  slug: string;
+}
+
+export function schoolSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Active schools, for the student sign-in picker.
+ *
+ * A username like `jss3-04` is only unique inside a school, so the school has
+ * to be established before sign-in. This is ONE query per SCHOOL_DIRECTORY_TTL
+ * shared by every student on every device - school names change about never.
+ * Only the id and name leave this function; no student data is involved.
+ */
+export const getSchoolDirectory = unstable_cache(
+  async (): Promise<SchoolListing[]> => {
+    const snap = await adminDb.collection(RP.schools).limit(QUERY_LIMIT).get();
+    const all = snap.docs
+      .map((d) => ({ id: d.id, ...(d.data() as ResultPeakSchool) }))
+      .filter((s) => s.isActive !== false && !!s.name);
+
+    // Two schools genuinely share a name in this project. Left alone, a child
+    // picks one of two identical rows and can never sign in. Nothing else on
+    // the school doc tells them apart, so fall back to a short id.
+    const counts = new Map<string, number>();
+    for (const s of all) counts.set(s.name, (counts.get(s.name) ?? 0) + 1);
+
+    return all
+      .map((s) => ({
+        id: s.id,
+        name: (counts.get(s.name) ?? 0) > 1 ? `${s.name} (${s.id.slice(0, 4)})` : s.name,
+        slug: schoolSlug(s.name),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
+  ["school-directory"],
+  { revalidate: 21600 } // 6 hours
+);
+
+/** Resolve a /s/{slug} link. Null when unknown or ambiguous - fall back to the picker. */
+export async function findSchoolBySlug(slug: string): Promise<SchoolListing | null> {
+  const matches = (await getSchoolDirectory()).filter((s) => s.slug === slug);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export async function getStudentsInClass(schoolId: string, classId: string) {

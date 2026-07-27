@@ -60,6 +60,22 @@ export interface ResultPeakTutor {
 
 // ---------- JDSmartLearn-owned (read + write) ----------
 
+/**
+ * A memorable sign-in name for a student: `jss3-04` instead of a 20-character
+ * document id. Derived from the CLASS, never from the child - this collection
+ * must stay free of personal data.
+ *
+ * Deliberately no `classId`: it would go stale the moment a student is moved,
+ * and the session's class always comes from `students/{studentId}` at sign-in.
+ */
+export interface StudentLogin {
+  /** Doc id is `${schoolId}_${username}`, so sign-in is one get and no query. */
+  schoolId: string;
+  studentId: string;
+  username: string;
+  createdAt: number;
+}
+
 export interface Topic {
   id: string;
   schoolId: string;
