@@ -1,0 +1,99 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { FirebaseError } from "firebase/app";
+import { clientAuth } from "@/lib/firebase/client";
+
+/** Auth codes that genuinely mean "wrong email or password". */
+const CREDENTIAL_ERRORS = new Set([
+  "auth/invalid-credential",
+  "auth/wrong-password",
+  "auth/user-not-found",
+  "auth/invalid-email",
+]);
+
+/** Tutors use their existing ResultPeak credentials - same Auth directory. */
+export default function TutorSignIn() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function signIn() {
+    setBusy(true);
+    setError(null);
+    try {
+      const cred = await signInWithEmailAndPassword(clientAuth, email, password);
+      const idToken = await cred.user.getIdToken();
+      const res = await fetch("/api/tutor/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
+      });
+      if (!res.ok) throw new Error("session");
+      router.push("/tutor");
+    } catch (err) {
+      if (err instanceof FirebaseError) {
+        if (CREDENTIAL_ERRORS.has(err.code)) {
+          setError("That email and password don't match.");
+        } else if (err.code === "auth/too-many-requests") {
+          setError("Too many attempts. Wait a few minutes and try again.");
+        } else if (err.code === "auth/network-request-failed") {
+          setError("We couldn't reach the network. Check your connection and try again.");
+        } else {
+          // Configuration problems (bad API key, disabled provider) - not the
+          // teacher's fault. Say so instead of blaming their password.
+          setError(`Sign-in isn't set up correctly (${err.code}). Contact your administrator.`);
+        }
+      } else {
+        setError("Signing in didn't finish. Try again.");
+      }
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="mx-auto max-w-sm px-5 py-16">
+      <h1 className="text-2xl font-semibold">Sign in</h1>
+      <p className="mt-2 text-sm text-slate">Use the same details as ResultPeak.</p>
+
+      <div className="mt-8 space-y-4">
+        <label className="block">
+          <span className="text-sm font-medium">Email</span>
+          <input
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
+          />
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium">Password</span>
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
+          />
+        </label>
+
+        {error && (
+          <p className="rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
+        )}
+
+        <button
+          onClick={signIn}
+          disabled={busy || !email || !password}
+          className="w-full rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
+        >
+          {busy ? "Signing in…" : "Sign in"}
+        </button>
+      </div>
+    </main>
+  );
+}

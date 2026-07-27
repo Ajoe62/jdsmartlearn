@@ -1,0 +1,36 @@
+{
+  "subjectId": "english",
+  "level": "JSS3",
+  "topics": [
+    {
+      "id": "jss3-eng-t1-01",
+      "term": 1,
+      "position": 1,
+      "title": "Parts of Speech",
+      "objectives": [
+        "Identify nouns, verbs, adjectives and adverbs in a sentence",
+        "Use each part of speech correctly in a sentence"
+      ]
+    },
+    {
+      "id": "jss3-eng-t1-02",
+      "term": 1,
+      "position": 2,
+      "title": "Comprehension and Summary",
+      "objectives": [
+        "Answer questions from a short passage",
+        "Summarise a passage in your own words"
+      ]
+    },
+    {
+      "id": "jss3-eng-t2-01",
+      "term": 2,
+      "position": 3,
+      "title": "Writing a Formal Letter",
+      "objectives": [
+        "State the parts of a formal letter",
+        "Write a formal letter on a given topic"
+      ]
+    }
+  ]
+}

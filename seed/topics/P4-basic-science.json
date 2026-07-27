@@ -1,0 +1,16 @@
+{
+  "subjectId": "basic-science",
+  "level": "P4",
+  "topics": [
+    {
+      "id": "p4-bsc-t1-01",
+      "term": 1,
+      "position": 1,
+      "title": "The Water Cycle",
+      "objectives": [
+        "Name the stages of the water cycle",
+        "Explain where rain comes from"
+      ]
+    }
+  ]
+}

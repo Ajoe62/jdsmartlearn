@@ -1,0 +1,202 @@
+// Shared domain types.
+// NOTE: types prefixed ResultPeak* describe collections this app READS ONLY.
+
+export type ClassLevel =
+  | "P1" | "P2" | "P3" | "P4" | "P5" | "P6"
+  | "JSS1" | "JSS2" | "JSS3"
+  | "SS1" | "SS2" | "SS3";
+
+export const PRIMARY_LEVELS: ClassLevel[] = ["P1", "P2", "P3", "P4", "P5", "P6"];
+
+export type Term = 1 | 2 | 3;
+/** Role strings as ResultPeak actually stamps them onto custom claims. */
+export type Role = "schooladmin" | "tutor";
+
+/**
+ * Firebase Auth custom claims set by ResultPeak's Admin SDK.
+ * Interpret `role`/`superadmin` via isAdmin() in lib/auth/roles - never compare
+ * the strings inline.
+ */
+export interface Claims {
+  role: Role;
+  /** The account's primary school - for admins, the school they administer. */
+  schoolId: string;
+  /** Newer multi-school accounts also carry every school they belong to. */
+  schoolIds?: string[];
+  active: boolean;
+  superadmin?: boolean;
+}
+
+// ---------- ResultPeak-owned (READ ONLY) ----------
+
+export interface ResultPeakSchool {
+  name: string;
+  subjects: { id: string; name: string }[];
+  gradingScale: { min: number; letter: string; remark: string }[];
+  isActive: boolean;
+}
+
+export interface ResultPeakClass {
+  name: string;
+  schoolId: string;
+  isActive: boolean;
+  /** May be absent on older records - see docs/ARCHITECTURE.md */
+  level?: ClassLevel;
+}
+
+export interface ResultPeakStudent {
+  fullName: string;
+  admissionNumber?: string;
+  classId: string;
+  className: string;
+  schoolId: string;
+  isActive: boolean;
+}
+
+export interface ResultPeakTutor {
+  assignedClasses: string[];
+  name?: string;
+}
+
+// ---------- JDSmartLearn-owned (read + write) ----------
+
+export interface Topic {
+  id: string;
+  schoolId: string;
+  /** Slugified subject id from schools/{id}.subjects[] - the ResultPeak join key. */
+  subjectId: string;
+  level: ClassLevel;
+  term: Term;
+  position: number;
+  title: string;
+  objectives: string[];
+  isCustom: boolean;
+  createdAt: number;
+}
+
+export type LessonStatus = "draft" | "generating" | "generated" | "published";
+
+export interface Lesson {
+  id: string;
+  schoolId: string;
+  topicId: string;
+  classId: string;
+  className: string;
+  subjectId: string;
+  tutorId: string;
+  title: string;
+  /** Extracted text - always present, the readable default on slow networks. */
+  extractedText: string;
+  /** Original uploaded file, stored in R2 (absent for pasted-text lessons). */
+  fileKey?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileType?: string;
+  /** Study-guide lifecycle. `published` means the AI study guide is student-visible. */
+  status: LessonStatus;
+  /** When the study guide was published. */
+  publishedAt?: number;
+  /**
+   * When the raw lesson material (extractedText) was published to students.
+   * Independent of the study guide - each publishes separately.
+   */
+  materialPublishedAt?: number;
+  /**
+   * Student-safe copy of the published study guide. Written on publish, removed
+   * on unpublish. Present only while status === "published".
+   */
+  studentPayload?: StudentPayload;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PracticeQuestion {
+  number: number;
+  question: string;
+}
+
+export interface MarkingGuideEntry {
+  number: number;
+  keyPoints: string[];
+}
+
+export interface GeneratedContent {
+  id: string;
+  schoolId: string;
+  lessonId: string;
+  summary: string;
+  questions: PracticeQuestion[];
+  /** TUTOR-ONLY. Never include in a student response. */
+  markingGuide: MarkingGuideEntry[];
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+  wouldBeCostUsd: number;
+  tutorEdited: boolean;
+  version: number;
+  createdAt: number;
+}
+
+/**
+ * Student-safe copy of the published study guide, denormalized onto the lesson
+ * doc at publish time so a whole class syncs in ONE query instead of an N+1 over
+ * generatedContent (see docs/OFFLINE-FIRST.md).
+ *
+ * Build it ONLY via toStudentPayload() in lib/db/lessons - that function names
+ * its fields instead of spreading GeneratedContent, so a marking guide cannot be
+ * copied in by accident. This shape has no field one could occupy.
+ */
+export interface StudentPayload {
+  summary: string;
+  questions: PracticeQuestion[];
+  /** Resolved from topics/{topicId} at publish time so sync needs no topic read. */
+  topicTitle: string;
+  /** Bumped on every publish/edit so a device knows its copy is stale. */
+  revision: number;
+}
+
+/** One lesson as it travels to a student device. Never carries a marking guide. */
+export interface SyncLesson {
+  lessonId: string;
+  title: string;
+  topicTitle: string;
+  subjectId: string;
+  subjectName: string;
+  hasMaterial: boolean;
+  hasStudyGuide: boolean;
+  updatedAt: number;
+  studyGuide: { summary: string; questions: PracticeQuestion[] } | null;
+  file: { name: string; size: number; inline: boolean } | null;
+}
+
+/** The index projection of SyncLesson - everything except the study guide body. */
+export type SyncIndexEntry = Omit<SyncLesson, "studyGuide"> & {
+  hasStudyGuide: boolean;
+};
+
+/** Study-guide shape returned to students. Structurally cannot carry a marking guide. */
+export interface StudentLessonView {
+  lessonId: string;
+  title: string;
+  topicTitle: string;
+  summary: string;
+  questions: PracticeQuestion[];
+}
+
+/**
+ * What a student sees for one lesson: the raw material and/or the study guide,
+ * each present only when its own publish switch is on. Never carries a marking
+ * guide (studyGuide is the safe projection).
+ */
+export interface StudentLessonDetail {
+  lessonId: string;
+  title: string;
+  topicTitle: string;
+  /** Published lesson material (extractedText), or null when not published. */
+  material: string | null;
+  /** Original file download info - only when material is published AND a file exists. */
+  file: { name: string; size: number; inline: boolean } | null;
+  /** Published study guide, or null when not published. */
+  studyGuide: { summary: string; questions: PracticeQuestion[] } | null;
+}

@@ -1,0 +1,36 @@
+{
+  "subjectId": "html_examination",
+  "level": "JSS3",
+  "topics": [
+    {
+      "id": "jss3-html-t1-01",
+      "term": 1,
+      "position": 1,
+      "title": "Structure of an HTML Document",
+      "objectives": [
+        "Name the main parts of an HTML page",
+        "Write a simple page with a heading and a paragraph"
+      ]
+    },
+    {
+      "id": "jss3-html-t1-02",
+      "term": 1,
+      "position": 2,
+      "title": "Links, Images and Lists",
+      "objectives": [
+        "Add a link and an image to a page",
+        "Create ordered and unordered lists"
+      ]
+    },
+    {
+      "id": "jss3-html-t2-01",
+      "term": 2,
+      "position": 3,
+      "title": "HTML Forms",
+      "objectives": [
+        "Build a form with text inputs and a button",
+        "Explain what a form is used for"
+      ]
+    }
+  ]
+}

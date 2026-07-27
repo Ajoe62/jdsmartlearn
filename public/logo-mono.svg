@@ -1,0 +1,10 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="JDSmartLearn AI">
+  <!-- ONE-COLOUR fallback. currentColor so you can set it once (default ink). -->
+  <g fill="none" stroke="currentColor" stroke-width="2.4" color="#15221C">
+    <rect x="19" y="16.2" width="24" height="31.6" rx="4"/>
+    <line x1="25" y1="25.3" x2="37" y2="25.3" stroke-linecap="round"/>
+    <line x1="25" y1="31.3" x2="37" y2="31.3" stroke-linecap="round"/>
+    <line x1="25" y1="37.3" x2="33" y2="37.3" stroke-linecap="round"/>
+  </g>
+  <path d="M45 10 L46.84 15.16 L52 17 L46.84 18.84 L45 24 L43.16 18.84 L38 17 L43.16 15.16 Z" fill="currentColor" color="#15221C"/>
+</svg>

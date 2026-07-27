@@ -1,0 +1,36 @@
+{
+  "subjectId": "ai_basics",
+  "level": "JSS3",
+  "topics": [
+    {
+      "id": "jss3-ai-t1-01",
+      "term": 1,
+      "position": 1,
+      "title": "What Is Artificial Intelligence?",
+      "objectives": [
+        "Explain in simple words what AI is",
+        "Give three examples of AI you use every day"
+      ]
+    },
+    {
+      "id": "jss3-ai-t1-02",
+      "term": 1,
+      "position": 2,
+      "title": "How Machines Learn",
+      "objectives": [
+        "Describe how a computer learns from examples",
+        "Explain why more examples help a machine improve"
+      ]
+    },
+    {
+      "id": "jss3-ai-t2-01",
+      "term": 2,
+      "position": 3,
+      "title": "Using AI Safely and Fairly",
+      "objectives": [
+        "List ways to use AI tools responsibly",
+        "Explain why AI can sometimes be wrong or unfair"
+      ]
+    }
+  ]
+}

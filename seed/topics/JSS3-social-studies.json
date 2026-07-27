@@ -1,0 +1,36 @@
+{
+  "subjectId": "social_studies",
+  "level": "JSS3",
+  "topics": [
+    {
+      "id": "jss3-soc-t1-01",
+      "term": 1,
+      "position": 1,
+      "title": "Drug Abuse and Its Effects",
+      "objectives": [
+        "Explain what drug abuse means",
+        "List common effects of drug abuse on the body and society"
+      ]
+    },
+    {
+      "id": "jss3-soc-t1-02",
+      "term": 1,
+      "position": 2,
+      "title": "National Unity and Integration",
+      "objectives": [
+        "Describe ways of promoting national unity in Nigeria",
+        "Explain the value of living together in peace"
+      ]
+    },
+    {
+      "id": "jss3-soc-t2-01",
+      "term": 2,
+      "position": 3,
+      "title": "Human Rights and Responsibilities",
+      "objectives": [
+        "State basic human rights of a Nigerian citizen",
+        "Match each right with a matching responsibility"
+      ]
+    }
+  ]
+}
