@@ -18,6 +18,18 @@ export const STORABLE_TYPES: Record<string, { mime: string; inline: boolean }> =
     inline: false, // browsers can't render docx - always download
   },
   ".txt": { mime: "text/plain; charset=utf-8", inline: true },
+  /**
+   * Photographs of handwritten work. Added for assignment submissions: a child
+   * with an exercise book and a phone camera has no other way to hand in
+   * written work, and it is the common case in these schools.
+   *
+   * There is no text extractor for an image. The grading route sends it to the
+   * provider's vision path instead, and a submission that is images only is
+   * graded from the pictures alone.
+   */
+  ".jpg": { mime: "image/jpeg", inline: true },
+  ".jpeg": { mime: "image/jpeg", inline: true },
+  ".png": { mime: "image/png", inline: true },
 };
 
 export function storageConfigured(): boolean {
