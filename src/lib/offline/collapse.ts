@@ -70,7 +70,28 @@ export type DeleteOp = {
   target: string;
 };
 
-export type OutboxOp = CreateOp | PatchOp | MaterialOp | PublishOp | DeleteOp;
+/**
+ * A mark on one submission, saved or released while offline.
+ *
+ * `target` is a submissionId, never a local id: a submission is created by a
+ * student on the server, so there is nothing here for a tutor to create offline
+ * and no chaining to worry about. Collapsing follows the patch rule exactly:
+ * last values win, oldest baseline survives.
+ *
+ * `release` false saves the mark; true finalises it and syncs the CA score.
+ * A finalise queued at home on Sunday lands on Monday, and the 409 guard is what
+ * stops it clobbering a mark saved in between.
+ */
+export type MarkOp = {
+  kind: "mark";
+  target: string;
+  release: boolean;
+  teacherScore: number | null;
+  teacherComment: string | null;
+  baseUpdatedAt: number;
+};
+
+export type OutboxOp = CreateOp | PatchOp | MaterialOp | PublishOp | DeleteOp | MarkOp;
 
 /** An op as stored, with its queue bookkeeping. */
 export type QueuedOp = {
@@ -172,6 +193,18 @@ function collapseTarget(ops: OutboxOp[]): OutboxOp[] {
   const lastMaterial = [...ops].reverse().find((o): o is MaterialOp => o.kind === "material");
   if (lastMaterial) result.push(lastMaterial);
 
+  // Marks collapse the same way patches do: the tutor's last decision is the one
+  // they saw on screen, and the OLDEST baseline is the state they actually
+  // started marking from, so the staleness check stays honest.
+  const marks = ops.filter((o): o is MarkOp => o.kind === "mark");
+  if (marks.length > 0) {
+    const last = marks[marks.length - 1];
+    result.push({
+      ...last,
+      baseUpdatedAt: marks.reduce((oldest, m) => Math.min(oldest, m.baseUpdatedAt), last.baseUpdatedAt),
+    });
+  }
+
   return result;
 }
 
@@ -188,5 +221,7 @@ export function describe(op: OutboxOp): string {
       return op.publish ? "Publish material" : "Hide material";
     case "delete":
       return "Delete";
+    case "mark":
+      return op.release ? "Release a mark" : "Save a mark";
   }
 }

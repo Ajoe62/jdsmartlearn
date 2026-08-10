@@ -5,16 +5,22 @@
  *   1. wipe if a different student last used this phone   (shared-phone safety)
  *   2. wipe if the offline grace window has expired       (bounded offline life)
  *   3. re-authorize against Firestore, wipe if revoked    (revocation on reconnect)
- *   4. sync content
- *   5. flush queued read receipts
+ *   4. sync content, then assignments
+ *   5. flush queued read receipts, then queued submissions
  *
  * Steps 1-3 are the security ordering and must stay in that order: never sync
  * into a store that still belongs to someone else.
+ *
+ * Within step 5 the ORDER matters too. Submissions flush last because a receipt
+ * is a soft metric that may be dropped, while a submission is a child's homework
+ * and must not be starved by a queue of receipts failing ahead of it.
  */
 
 import { wipeContent } from "./db";
 import { ensureOwner, enforceGrace, sync, SYNC_STALE_MS, syncState } from "./sync";
 import { flush } from "./outbox";
+import { resetAssignmentSync, syncAssignments } from "./assignments-sync";
+import { flushSubmissions } from "./submissions";
 
 export type BootResult = {
   /** The student must sign in again - the store was wiped or never existed. */
@@ -63,14 +69,23 @@ export async function boot(studentId: string): Promise<BootResult> {
   await ensureOwner(studentId);
 
   const { wiped } = await enforceGrace();
-  if (wiped) return { needsSignIn: true, revoked: false };
+  if (wiped) {
+    // The store this ETag described is gone; keeping it would make the next
+    // sync a 304 against an empty device.
+    resetAssignmentSync();
+    return { needsSignIn: true, revoked: false };
+  }
 
   const online = typeof navigator === "undefined" || navigator.onLine !== false;
   if (online) {
     const { ok, revoked } = await ensureSession();
-    if (!ok) return { needsSignIn: true, revoked };
+    if (!ok) {
+      resetAssignmentSync();
+      return { needsSignIn: true, revoked };
+    }
     await sync();
-    void flush();
+    await syncAssignments();
+    void flush().then(() => flushSubmissions());
   }
 
   booted = true;
@@ -83,7 +98,8 @@ export async function refreshIfStale(): Promise<void> {
   const { lastSyncAt } = syncState();
   if (lastSyncAt && Date.now() - lastSyncAt < SYNC_STALE_MS) return;
   await sync();
-  void flush();
+  await syncAssignments();
+  void flush().then(() => flushSubmissions());
 }
 
 /**
@@ -99,7 +115,8 @@ export function watchConnection(): () => void {
       const { ok } = await ensureSession();
       if (!ok) return;
       await sync();
-      void flush();
+      await syncAssignments();
+      void flush().then(() => flushSubmissions());
     })();
   };
 
@@ -128,6 +145,9 @@ async function registerBackgroundSync(): Promise<void> {
       sync?: { register: (tag: string) => Promise<void> };
     })?.sync;
     await sync?.register("jd-outbox");
+    // A separate tag so a child's queued homework is not lost behind a batch of
+    // read receipts failing, and so the worker can tell the two apart.
+    await sync?.register("jd-submissions");
   } catch {
     // Unsupported or denied. The online/visibility triggers cover it.
   }

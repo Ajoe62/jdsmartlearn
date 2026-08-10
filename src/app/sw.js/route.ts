@@ -86,10 +86,19 @@ self.addEventListener("message", (event) => {
 self.addEventListener("sync", (event) => {
   // One-shot Background Sync: nudge any open tab to flush its queue. If no tab is
   // open the next app open will flush anyway.
-  if (event.tag === "jd-outbox") {
+  //
+  // Two tags, not one. Read receipts are a soft metric; a queued submission is a
+  // child's homework. Keeping them separate means a browser that drops one tag
+  // has not dropped the other.
+  const messages = {
+    "jd-outbox": "FLUSH_OUTBOX",
+    "jd-submissions": "FLUSH_SUBMISSIONS",
+  };
+  const message = messages[event.tag];
+  if (message) {
     event.waitUntil(
       self.clients.matchAll({ includeUncontrolled: true }).then((cs) => {
-        for (const c of cs) c.postMessage({ type: "FLUSH_OUTBOX" });
+        for (const c of cs) c.postMessage({ type: message });
       })
     );
   }

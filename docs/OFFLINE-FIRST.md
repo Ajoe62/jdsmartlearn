@@ -1,6 +1,6 @@
 # Offline-first mode — design and implementation plan
 
-Status: **all phases built.** Student offline reading, the read-receipt queue, revocation on reconnect, opt-in file saving, and the tutor write queue. The CLAUDE.md amendment in §1 has been applied. Not yet exercised on a real device — see the manual checklist in §11.
+Status: **all phases built.** Student offline reading, the read-receipt queue, revocation on reconnect, opt-in file saving, and the tutor write queue. Phase 5 (assessment) was added on 2026-08-10 and is described in §12. The CLAUDE.md amendment in §1 has been applied. Not yet exercised on a real device. See the manual checklist in §11.
 
 ---
 
@@ -531,3 +531,67 @@ Not yet run — these need a real device, a seeded student and a throttled link.
 - [x] No secret exposed to the client — SW and IndexedDB code carry none
 - [x] No write to a ResultPeak-owned collection — writes go to `lessons.studentPayload` and `lessonViews`, both JD-owned, both through `assertWritable`
 - [x] No `firebase deploy`, no new composite index, no client Firestore access, no `onSnapshot`, no polling, no Firebase Storage
+
+---
+
+## 12. Phase 5: Assessment (added 2026-08-10)
+
+Assignments, submissions and marking extend the design above. They add no new
+mechanism: the same stores, the same on-demand triggers, the same queue.
+
+### Student
+
+| Store | Holds | Wiped by |
+|---|---|---|
+| `assignments` | the list, plus instructions for unanswered work | `destroy()` |
+| `submissions` | this student's own answers and released marks | `destroy()` |
+| `drafts` | answers still being written | `destroy()` |
+| `submissionOutbox` | finished answers waiting for a network | `destroy()` |
+
+Database version 3. `wipeDevice()` deletes the whole database, so the four new
+stores were covered by the shared-phone path the moment they existed. No change
+was needed there, and none should be added.
+
+`syncAssignments()` runs inside `boot.ts`, after the three security steps, never
+on its own schedule. One request, ETag'd, deletes what the server no longer
+lists before writing what it does: a tutor switching an assignment off takes it
+off the phone, exactly as a withdrawn lesson is removed.
+
+Flush order is deliberate. Read receipts first, submissions second. A receipt is
+a soft metric that may be dropped to protect the quota; a submission is a
+child's homework and must not be starved behind a queue of receipts failing.
+
+**Text only in the queue.** A submission with attachments requires a connection,
+and the form says so before the student starts writing. Holding a multi-megabyte
+photo in IndexedDB until reconnect would blow the device budget and put an
+unmanaged copy of a child's work outside the grace window and the wipe path.
+
+A rejected submission is never dropped silently. The 4xx message is stored on
+the queued row and shown on the assignments list with a way to clear it, the
+same contract the tutor queue has always had.
+
+### Tutor
+
+Marking joins the EXISTING outbox as a `mark` op rather than starting a second
+queue: same store, same collapse pass, same sequential flush, same
+4xx-is-terminal rule, same `PendingUploads` surface. Collapsing follows the patch
+rule, last values winning and the oldest `baseUpdatedAt` surviving, so a mark
+queued at home on Sunday cannot clobber one saved on Monday. Five tests cover it.
+
+### What tutors deliberately cannot do offline
+
+**Open the submissions page.** `/tutor/assignments/[id]/submissions` renders the
+marking guide, so it is network-only, exactly like `/tutor/lessons/[id]` and
+`/tutor/sign-ins`. Caching submissions for offline viewing would mean caching
+the page that displays them, and there is no version of that which keeps marking
+guides off the device.
+
+So the split is: a tutor marks offline only from a page they already have open
+when the signal drops, and their marks queue and send on reconnect. Opening the
+list fresh needs a connection. This was a choice between two rules in CLAUDE.md,
+and the marking-guide rule wins.
+
+**Setting an assignment** is online-only too. A queued assignment cannot
+announce itself to a class, and a due date set offline on Monday may already have
+passed when it uploads on Thursday. Setting work is a scheduled act; writing a
+lesson is not.

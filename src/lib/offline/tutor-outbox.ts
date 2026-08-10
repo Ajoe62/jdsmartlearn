@@ -25,6 +25,7 @@ import {
   isLocalId,
   type CreateOp,
   type DeleteOp,
+  type MarkOp,
   type MaterialOp,
   type OutboxOp,
   type PatchOp,
@@ -199,6 +200,8 @@ async function send(op: OutboxOp): Promise<SendResult> {
         return await sendMaterial(op);
       case "delete":
         return await sendDelete(op);
+      case "mark":
+        return await sendMark(op);
     }
   } catch {
     // Network died mid-request.
@@ -289,6 +292,27 @@ async function sendDelete(op: DeleteOp): Promise<SendResult> {
   });
   // Already gone is success as far as the queue is concerned.
   if (res.status === 404) return { kind: "ok" };
+  return classify(res);
+}
+
+/**
+ * The same route the online review panel posts to, so the ownership check, the
+ * class check, the score clamp and the 409 staleness guard are identical. A
+ * queued mark for a class the tutor no longer teaches is SUPPOSED to fail.
+ */
+async function sendMark(op: MarkOp): Promise<SendResult> {
+  const res = await fetch("/api/tutor/finalise-assignment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({
+      submissionId: op.target,
+      action: op.release ? "finalise" : "draft",
+      teacherScore: op.teacherScore,
+      teacherComment: op.teacherComment,
+      baseUpdatedAt: op.baseUpdatedAt,
+    }),
+  });
   return classify(res);
 }
 
