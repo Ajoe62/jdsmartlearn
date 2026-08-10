@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { flush } from "@/lib/offline/outbox";
+import { flushSubmissions } from "@/lib/offline/submissions";
 
 /**
  * Registers the service worker and relays its Background Sync nudge.
@@ -15,6 +16,7 @@ export default function ServiceWorkerRegistrar() {
 
     const onMessage = (e: MessageEvent) => {
       if (e.data?.type === "FLUSH_OUTBOX") void flush();
+      if (e.data?.type === "FLUSH_SUBMISSIONS") void flushSubmissions();
     };
 
     navigator.serviceWorker.addEventListener("message", onMessage);

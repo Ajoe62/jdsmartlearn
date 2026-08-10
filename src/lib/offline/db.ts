@@ -10,8 +10,11 @@
  */
 
 export const DB_NAME = "jdsmartlearn";
-/** v2 added the `files` store (saved original files). */
-export const DB_VERSION = 2;
+/**
+ * v2 added the `files` store (saved original files).
+ * v3 added `assignments`, `submissions` and `drafts` for assessment.
+ */
+export const DB_VERSION = 3;
 
 export const STORE = {
   meta: "meta",
@@ -19,6 +22,18 @@ export const STORE = {
   materials: "materials",
   files: "files",
   outbox: "outbox",
+  /** The assignment list, keyed by assignmentId. Never holds a marking guide. */
+  assignments: "assignments",
+  /** This student's own submissions, keyed by assignmentId. */
+  submissions: "submissions",
+  /** Answers still being written, keyed by assignmentId. */
+  drafts: "drafts",
+  /**
+   * Finished answers waiting for a network. Separate from `outbox`, which holds
+   * read receipts: a receipt is a soft metric that may be dropped, a submission
+   * is a child's work that may not.
+   */
+  submissionOutbox: "submissionOutbox",
 } as const;
 
 export type StoreName = (typeof STORE)[keyof typeof STORE];
@@ -70,6 +85,75 @@ export type StoredFile = {
   savedAt: number;
 };
 
+/**
+ * One row of the assignment list, saved for offline reading.
+ *
+ * Mirrors AssignmentListItem minus the fields the device recomputes (isOverdue
+ * depends on the current time, so storing it would go stale in the drawer).
+ * Carries no marking guide, because the projection it comes from has no field
+ * for one.
+ */
+export type StoredAssignment = {
+  assignmentId: string;
+  title: string;
+  subjectId: string;
+  subjectName: string;
+  type: string;
+  dueDate: number;
+  maxMarks: number;
+  /** Instructions, saved when the student opens the assignment. */
+  description: string | null;
+  allowedFileTypes: string[];
+  savedAt: number;
+};
+
+/**
+ * This student's own submission for one assignment.
+ *
+ * A finalised submission never changes again, so it is kept until the grace
+ * window wipes the store. An unfinalised one is refreshed on every sync.
+ */
+export type StoredSubmission = {
+  assignmentId: string;
+  status: string;
+  submittedAt: number;
+  content: string;
+  maxMarks: number;
+  finalScore: number | null;
+  feedback: string | null;
+  strengths: string[] | null;
+  improvements: string[] | null;
+  topicsToRevise: { topic: string; lessonId: string | null }[] | null;
+  topicsMastered: string[] | null;
+  teacherComment: string | null;
+  savedAt: number;
+};
+
+/** An answer still being written. Survives a closed tab and a dead battery. */
+export type StoredDraft = {
+  assignmentId: string;
+  content: string;
+  updatedAt: number;
+};
+
+/**
+ * A finished answer waiting for a network.
+ *
+ * Text only, always. A multi-megabyte photo held here until reconnect would blow
+ * the device budget and put an unmanaged copy of a child's work outside the
+ * grace window and the wipe-on-sign-in path, so a submission with attachments
+ * requires a connection and the form says so before they start.
+ */
+export type QueuedSubmission = {
+  assignmentId: string;
+  content: string;
+  queuedAt: number;
+  /** Stable across retries, so a replayed flush cannot double-post. */
+  batchId: string;
+  /** Set when the server rejected it for good. Surfaced, never silently dropped. */
+  error: string | null;
+};
+
 export type OutboxView = {
   id?: number;
   kind: "view";
@@ -110,6 +194,21 @@ function open(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE.outbox)) {
         db.createObjectStore(STORE.outbox, { keyPath: "id", autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains(STORE.assignments)) {
+        db.createObjectStore(STORE.assignments, { keyPath: "assignmentId" });
+      }
+      if (!db.objectStoreNames.contains(STORE.submissions)) {
+        db.createObjectStore(STORE.submissions, { keyPath: "assignmentId" });
+      }
+      if (!db.objectStoreNames.contains(STORE.drafts)) {
+        db.createObjectStore(STORE.drafts, { keyPath: "assignmentId" });
+      }
+      if (!db.objectStoreNames.contains(STORE.submissionOutbox)) {
+        // Keyed by assignmentId, so queuing the same assignment twice replaces
+        // rather than duplicates. One submission per assignment, on the device
+        // as well as on the server.
+        db.createObjectStore(STORE.submissionOutbox, { keyPath: "assignmentId" });
       }
     };
 
