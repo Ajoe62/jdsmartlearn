@@ -86,6 +86,15 @@ export default function DashboardView({
     <main className="mx-auto max-w-readable px-5 py-10">
       <h1 className="text-2xl font-semibold">Your subjects</h1>
 
+      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+        <Link href="/student/assignments" className="text-sm text-marker underline">
+          Your work
+        </Link>
+        <Link href="/student/progress" className="text-sm text-marker underline">
+          Your progress
+        </Link>
+      </div>
+
       {savedAt && (
         <p className="mt-2 text-xs text-slate">
           Saved on your phone &middot; updated {relativeTime(savedAt)}
