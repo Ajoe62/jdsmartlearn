@@ -41,12 +41,19 @@ export default async function TutorDashboard() {
       </div>
 
       {classes.length > 0 && (
-        <Link
-          href="/tutor/sign-ins"
-          className="mt-4 inline-block text-sm text-marker underline"
-        >
-          Student sign-ins
-        </Link>
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
+          <Link href="/tutor/assignments" className="text-sm text-marker underline">
+            Assignments
+          </Link>
+          <Link href="/tutor/sign-ins" className="text-sm text-marker underline">
+            Student sign-ins
+          </Link>
+          {session.isAdmin && (
+            <Link href="/tutor/settings" className="text-sm text-marker underline">
+              Assessment settings
+            </Link>
+          )}
+        </div>
       )}
 
       {classes.length === 0 && (
