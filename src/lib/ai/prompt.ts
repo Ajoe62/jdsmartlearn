@@ -69,3 +69,60 @@ export function buildPrompt({ lessonText, subjectName, topicTitle, level }: Prom
 }
 
 export const MAX_LESSON_CHARS = 30_000;
+
+/**
+ * Beyond this, output quality falls off on the free tier: the model starts
+ * summarising the submission rather than marking it. A longer answer is
+ * truncated and the tutor sees the whole thing anyway on the review screen.
+ */
+export const MAX_SUBMISSION_CHARS = 3_000;
+
+export interface GradingPromptInput {
+  assignmentTitle: string;
+  subjectName: string;
+  markingGuide: string;
+  maxMarks: number;
+  submissionText: string;
+}
+
+/**
+ * The grading prompt.
+ *
+ * IMPORTANT: same rule as buildPrompt above. This payload carries the
+ * assignment and the child's own words and NOTHING that identifies them. Never
+ * add a student name, student id, tutor name, or school name - the free tier
+ * permits the provider to use submitted content (CLAUDE.md, Assessment rules).
+ *
+ * The instructions push hard against two failure modes seen in marking models:
+ * inventing credit for content that is not in the answer, and marking an empty
+ * or off-topic answer generously out of politeness.
+ */
+export function buildGradingPrompt({
+  assignmentTitle,
+  subjectName,
+  markingGuide,
+  maxMarks,
+  submissionText,
+}: GradingPromptInput) {
+  const system = [
+    `You are a Nigerian secondary school teacher marking a student submission. Be fair and constructive.`,
+    `Mark ONLY against the marking guide. Award nothing for content the student did not write.`,
+    `If the answer is empty, off topic, or too short to judge, give a low score and say so plainly in the feedback. Do not be generous to be kind.`,
+    `Set confidence to "low" when the submission is hard to read, very short, or only partly addresses the question. A tutor reads your confidence before trusting your score.`,
+    `Feedback speaks TO the student, in the second person, in plain words they will understand.`,
+    `topicsMastered and topicsToRevise name topics from this subject, not phrases from the answer.`,
+    `Score out of ${maxMarks}. Return ONLY JSON matching the provided schema.`,
+  ].join("\n");
+
+  const user = [
+    `Assignment: ${assignmentTitle}`,
+    `Subject: ${subjectName}`,
+    `Marking guide: ${markingGuide}`,
+    `Maximum marks: ${maxMarks}`,
+    ``,
+    `Student submission:`,
+    submissionText.slice(0, MAX_SUBMISSION_CHARS),
+  ].join("\n");
+
+  return { system, user };
+}
