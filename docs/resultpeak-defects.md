@@ -90,6 +90,37 @@ defect 2.
 Either way the existing rows need a decision: a migration, or an admin tool that
 merges two session strings into one for a class.
 
+### The annual average makes this worse, and the count as of 2026-08-13
+
+ResultPeak is gaining an end-of-session annual average computed from the three
+term percentages. It joins the terms by exact string match, so a term recorded
+under the wrong session does not error and does not blank the figure: it drops
+out of the average, and a plausible number prints without it. Today the symptom
+is a missing column an operator might notice. With the annual average it becomes
+a wrong number nobody can see is wrong.
+
+`npm run diagnose:terms <schoolId>` reports this per school, read-only. Run
+against every school in the project on 2026-08-13:
+
+| School | Pairs in `exams` and `results` |
+|---|---|
+| CAPSTONE ACADEMY | 2811 rows, all `Third Term` / `2025/2026`. Clean. |
+| HIGHER GROUND INTERNATIONAL | `First Term` / `2025/2026` (4), `Third Term` / `2025/2026` (1). Clean. |
+| Mt. Cedar British International | 6 rows, all `First Term` / `2026/2027`. |
+| Dlink Academy (ActiveBrains) | **`Third Term` split**: `2026/2027` (34), `2025/2026` (31). |
+| YpnConnect | **`Third Term` split**: `2025/2026` (11), `2026/2027` (10). Plus `First Term` / `2026/2027` (4). |
+| Tech School | **`Third Term` split**: `2025/2026` (1), `2026/2027` (1). |
+
+**51 rows carry `2026/2027`**, a session that has not started, which is
+`defaultSession()` misfiring exactly as described above. Three schools have one
+term of one school year already divided across two result sheets. A JDSmartLearn
+assignment can join to only one side of each split, whichever session string the
+school's setting carries at the time it is created.
+
+The 2026-08-10 sample above ("sixty exams split three ways") was taken across
+schools rather than within one, which is why its shape differs from this table.
+Per school is the unit that matters, because a result sheet is per school.
+
 ---
 
 ## 2. No record of which term and session is current

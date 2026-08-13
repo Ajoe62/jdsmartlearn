@@ -31,6 +31,15 @@ import {
   termOrder,
 } from "../src/lib/academic-calendar";
 import { assertRecordFields } from "../src/lib/db/write-guard";
+import { readOnlyDb } from "../src/lib/db/read-only";
+import {
+  auditTermSessions,
+  formatReport,
+  pairKey,
+  visible,
+  type JdRow,
+  type RpRow,
+} from "../src/lib/assessment/term-session-audit";
 import {
   averagePercentage,
   decideCaTarget,
@@ -1197,6 +1206,10 @@ const PURE_MODULES = [
   "src/lib/assessment/ca.ts",
   "src/lib/assessment/grading-recovery.ts",
   "src/lib/assessment/skips.ts",
+  // The term and session audit. Pure so the byte-for-byte comparison can be
+  // tested with strings that differ by one invisible character, which is the
+  // whole failure mode and is not something a live project reliably contains.
+  "src/lib/assessment/term-session-audit.ts",
   // The two student-safe projections. These decide whether a marking guide or an
   // unreleased AI score can reach a child's phone, so of everything on this list
   // they are the ones most worth testing against the real function.
@@ -1368,4 +1381,353 @@ test("the pure assessment modules read no secret", () => {
     const hit = secretish.exec(readPure(rel));
     assert.equal(hit, null, `${rel} reads ${hit?.[0]}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Term and session audit: does a mark join, or does it drop out silently?
+// ---------------------------------------------------------------------------
+
+const jdRow = (term: unknown, session: unknown, source: JdRow["source"] = "assignments"): JdRow => ({
+  term,
+  session,
+  source,
+});
+const rpRow = (term: unknown, session: unknown, source: RpRow["source"] = "exams"): RpRow => ({
+  term,
+  session,
+  source,
+});
+
+test("a pair is matched only when both halves match byte for byte", () => {
+  const rp = [rpRow("First Term", "2025/2026")];
+
+  const exact = auditTermSessions([jdRow("First Term", "2025/2026")], rp);
+  assert.equal(exact.rows[0]?.matched, true);
+  assert.deepEqual(exact.rows[0]?.matchedIn, ["exams"]);
+  assert.equal(exact.totals.unmatchedPairs, 0);
+
+  // Each of these is a different result sheet in ResultPeak, so each is a
+  // different pair here. Trimming any of them away would be the bug.
+  const differing = [
+    ["First Term ", "2025/2026", "trailing space on the term"],
+    [" First Term", "2025/2026", "leading space on the term"],
+    ["first term", "2025/2026", "lower case term"],
+    ["First  Term", "2025/2026", "doubled inner space"],
+    ["First\u00a0Term", "2025/2026", "non-breaking space in the term"],
+    ["First Term", "2025/2026 ", "trailing space on the session"],
+    ["First Term", "2025-2026", "a different separator in the session"],
+  ] as const;
+
+  for (const [term, session, why] of differing) {
+    const report = auditTermSessions([jdRow(term, session)], rp);
+    assert.equal(report.rows[0]?.matched, false, `should not have matched: ${why}`);
+    assert.equal(report.totals.unmatchedRows, 1);
+  }
+});
+
+test("an unmatched pair says what it nearly is, without that changing its status", () => {
+  const report = auditTermSessions(
+    [jdRow("First Term ", "2025/2026")],
+    [rpRow("First Term", "2025/2026", "results")]
+  );
+
+  const row = report.rows[0];
+  assert.equal(row?.matched, false, "a near miss is still a miss");
+  assert.deepEqual(row?.matchedIn, []);
+  assert.equal(row?.nearMisses.length, 1);
+  assert.equal(row?.nearMisses[0]?.source, "results");
+  assert.deepEqual(row?.nearMisses[0]?.differences, ["trailing whitespace on the term"]);
+
+  // A genuinely different session is nobody's near miss.
+  const unrelated = auditTermSessions(
+    [jdRow("First Term", "2019/2020")],
+    [rpRow("First Term", "2025/2026")]
+  );
+  assert.deepEqual(unrelated.rows[0]?.nearMisses, []);
+});
+
+test("invisible characters are rendered, and only for display", () => {
+  assert.equal(visible("First\u00a0Term"), "First\\u00a0Term");
+  assert.equal(visible("2025/2026\u200b"), "2025/2026\\u200b");
+  assert.equal(visible("a\tb"), "a\\tb");
+  assert.equal(visible("First Term"), "First Term", "an ordinary string is untouched");
+
+  // The rendering reaches the report, so a difference nobody can see in a
+  // terminal is still readable there.
+  const report = auditTermSessions([jdRow("First\u00a0Term", "2025/2026")], []);
+  assert.equal(report.rows[0]?.term, "First\\u00a0Term");
+});
+
+test("pair keys cannot collide across the term and session boundary", () => {
+  // A joined key like `term + "|" + session` reports these two as the same pair,
+  // which is the one wrong answer that matters: a mismatch shown as a match.
+  assert.notEqual(pairKey("a|b", "c"), pairKey("a", "b|c"));
+  assert.notEqual(pairKey('a"', "b"), pairKey("a", '"b'));
+  assert.equal(pairKey("First Term", "2025/2026"), pairKey("First Term", "2025/2026"));
+});
+
+test("rows are counted per source, and the heaviest unmatched pair leads", () => {
+  const report = auditTermSessions(
+    [
+      jdRow("Third Term", "2025/2026", "assignments"),
+      jdRow("Third Term", "2025/2026", "submissions"),
+      jdRow("Third Term", "2025/2026", "submissions"),
+      jdRow("First Term", "2026/2027", "assignments"),
+      jdRow("Second Term", "2025/2026", "assignments"),
+    ],
+    [rpRow("Third Term", "2025/2026")]
+  );
+
+  assert.equal(report.totals.rows, 5);
+  assert.equal(report.totals.pairs, 3);
+  assert.equal(report.totals.unmatchedPairs, 2);
+  assert.equal(report.totals.unmatchedRows, 2);
+
+  // Unmatched first. Both unmatched pairs carry one row, so they fall back to a
+  // stable order rather than to whichever was read first: session before term,
+  // because a reader is looking for two sessions that should have been one.
+  assert.deepEqual(
+    report.rows.map((r) => [r.term, r.session, r.matched]),
+    [
+      ["Second Term", "2025/2026", false],
+      ["First Term", "2026/2027", false],
+      ["Third Term", "2025/2026", true],
+    ]
+  );
+
+  const matched = report.rows[2];
+  assert.deepEqual(matched?.counts, { assignments: 1, submissions: 2 });
+  assert.equal(matched?.total, 3);
+});
+
+test("a row with no usable term or session is a finding, not a skipped row", () => {
+  const report = auditTermSessions(
+    [
+      jdRow(undefined, "2025/2026"),
+      jdRow("First Term", null),
+      jdRow("First Term", ""),
+      jdRow(3, "2025/2026"),
+    ],
+    [rpRow("First Term", "2025/2026")]
+  );
+
+  assert.equal(report.rows.length, 0, "none of these can be compared as a pair");
+  assert.equal(
+    report.malformed.reduce((n, g) => n + g.total, 0),
+    4,
+    "and none of them may be dropped either"
+  );
+  const rendered = report.malformed.map((g) => `${g.term} / ${g.session}`);
+  assert.ok(rendered.includes("(field absent) / 2025/2026"));
+  assert.ok(rendered.includes("First Term / (null)"));
+  assert.ok(rendered.includes("First Term / (empty string)"));
+  assert.ok(rendered.includes("(number: 3) / 2025/2026"));
+});
+
+test("a term carried under two sessions is reported as a split", () => {
+  const report = auditTermSessions(
+    [],
+    [
+      rpRow("Third Term", "2025/2026", "exams"),
+      rpRow("Third Term", "2026/2027", "results"),
+      rpRow("Third Term", "2026/2027", "results"),
+      rpRow("First Term", "2025/2026", "exams"),
+    ]
+  );
+
+  assert.equal(report.splitTerms.length, 1);
+  assert.equal(report.splitTerms[0]?.term, "Third Term");
+  assert.deepEqual(report.splitTerms[0]?.sessions, [
+    { session: "2026/2027", total: 2 },
+    { session: "2025/2026", total: 1 },
+  ]);
+
+  // This is the shape the live project is in, and it is a finding even though
+  // JDSmartLearn has no rows at all yet.
+  assert.equal(report.totals.rows, 0);
+
+  const lines = formatReport(report, "school-1").join("\n");
+  assert.match(lines, /SPLIT TERM/);
+  assert.match(lines, /"2026\/2027" \(2 row\(s\)\), "2025\/2026" \(1 row\(s\)\)/);
+});
+
+test("the school profile is a source of its own, and says so when it is the only one", () => {
+  const report = auditTermSessions(
+    [jdRow("First Term", "2026/2027")],
+    [rpRow("First Term", "2026/2027", "school profile")]
+  );
+
+  assert.equal(report.rows[0]?.matched, true);
+  const lines = formatReport(report, "school-1").join("\n");
+  assert.match(lines, /only the school profile states this pair/);
+  assert.match(lines, /No exam or result carries it yet/);
+});
+
+test("the report says what an operator has to do next", () => {
+  const lines = formatReport(
+    auditTermSessions([jdRow("First Term", "2026/2027")], [rpRow("Third Term", "2025/2026")]),
+    "school-1"
+  ).join("\n");
+
+  assert.match(lines, /1 unmatched pair\(s\) covering 1 row\(s\)/);
+  assert.match(lines, /UNMATCHED/);
+  assert.match(lines, /no exam, result or school profile in this school carries this pair/);
+  // Quoted, so a trailing space is visible at the end of the column.
+  assert.match(lines, /"First Term" \/ "2026\/2027"/);
+});
+
+// ---------------------------------------------------------------------------
+// The read-only handle, and the diagnostic that must keep using it
+// ---------------------------------------------------------------------------
+
+/** Enough of a Firestore to exercise the wrapper without a network or a project. */
+function fakeFirestore() {
+  const wrote: string[] = [];
+  const docRef = (path: string) => ({
+    path,
+    get: async () => ({ exists: true, data: () => ({ term: "First Term" }) }),
+    set: (v: unknown) => wrote.push(`set ${path} ${JSON.stringify(v)}`),
+    update: () => wrote.push(`update ${path}`),
+    delete: () => wrote.push(`delete ${path}`),
+  });
+  const collectionRef = (path: string) => ({
+    path,
+    doc: (id: string) => docRef(`${path}/${id}`),
+    add: () => wrote.push(`add ${path}`),
+    where: () => ({ limit: () => ({ get: async () => ({ size: 1, docs: [] }) }) }),
+  });
+  return {
+    wrote,
+    db: {
+      collection: collectionRef,
+      doc: docRef,
+      batch: () => ({ commit: async () => wrote.push("batch commit") }),
+      runTransaction: async () => wrote.push("transaction"),
+    },
+  };
+}
+
+test("a read-only handle still reads", async () => {
+  const { db } = fakeFirestore();
+  const readable = readOnlyDb(db);
+
+  const snap = await readable.doc("schools/abc").get();
+  assert.equal(snap.exists, true);
+  assert.equal(snap.data().term, "First Term");
+
+  const page = await readable.collection("assignments").where().limit().get();
+  assert.equal(page.size, 1);
+
+  // The path survives the wrapper, which is what puts a usable path in a refusal.
+  assert.equal(readable.collection("assignments").path, "assignments");
+});
+
+test("a read-only handle refuses every write, and nothing reaches the fake", () => {
+  const { db, wrote } = fakeFirestore();
+  const readable = readOnlyDb(db);
+
+  assert.throws(() => readable.doc("assignments/a1").set({ term: "x" }), /read-only/);
+  assert.throws(() => readable.doc("assignments/a1").update(), /read-only/);
+  assert.throws(() => readable.doc("assignments/a1").delete(), /read-only/);
+  assert.throws(() => readable.collection("assignments").add(), /read-only/);
+  // Reached through the collection rather than directly: the child reference is
+  // wrapped too, which is the leak this would otherwise have.
+  assert.throws(() => readable.collection("assignments").doc("a1").set({}), /read-only/);
+  assert.throws(() => readable.batch(), /read-only/);
+  assert.throws(() => readable.runTransaction(), /read-only/);
+
+  assert.deepEqual(wrote, [], "not one write may reach the underlying handle");
+});
+
+test("a write to a ResultPeak collection is refused as theirs, not merely as read-only", () => {
+  const { db } = fakeFirestore();
+  const readable = readOnlyDb(db);
+
+  // The ownership message comes first, because "this is somebody else's data" is
+  // what a reader needs before "this handle happens to be read-only".
+  assert.throws(() => readable.doc("results/r1").set({}), /ResultPeak owns this collection/);
+  assert.throws(() => readable.collection("students").doc("s1").delete(), /ResultPeak owns/);
+  assert.throws(() => readable.doc("schools/s1").update(), /ResultPeak owns/);
+
+  // A JDSmartLearn path is refused as well. A diagnostic repairs nothing at all,
+  // not even our own collections.
+  assert.throws(() => readable.doc("assignments/a1").set({}), /diagnostic/);
+});
+
+/**
+ * The diagnostic script must not grow a write, and it must keep asking for the
+ * wrapped handle.
+ *
+ * A SECOND GUARD OVER THE SAME FILE, on purpose. `readOnlyDb` covers the handle;
+ * it cannot cover a reference reached through a snapshot's `.ref`, and it covers
+ * nothing at all if somebody calls `getFirestore()` again further down the file.
+ * This scan covers both of those and costs one regex.
+ */
+const DIAGNOSTIC = "scripts/diagnose-term-session.ts";
+
+/** Method calls that write. `add` catches a `Set` too, which is a fair price. */
+const WRITE_CALL = /\.(set|update|delete|create|add|batch|bulkWriter|runTransaction|recursiveDelete)\s*\(/;
+
+function diagnosticViolations(source: string): string[] {
+  const problems: string[] = [];
+
+  const write = WRITE_CALL.exec(source);
+  if (write) {
+    problems.push(
+      `${DIAGNOSTIC} calls ${write[0]}, which writes. A diagnostic reports and repairs nothing.`
+    );
+  }
+  /**
+   * EVERY `getFirestore()` must be wrapped, counted rather than merely spotted.
+   *
+   * `source.includes("readOnlyDb(")` was the obvious check and it was useless:
+   * the file's own doc comment names `readOnlyDb()`, so unwrapping the handle
+   * left the check passing. Counting catches both the unwrap and the second,
+   * unwrapped handle fetched further down the file.
+   */
+  const handles = source.match(/getFirestore\(\)/g)?.length ?? 0;
+  const wrapped = source.match(/readOnlyDb\(getFirestore\(\)\)/g)?.length ?? 0;
+  if (handles === 0 || handles !== wrapped) {
+    problems.push(
+      `${DIAGNOSTIC} has ${handles} getFirestore() call(s) and ${wrapped} wrapped in ` +
+        `readOnlyDb(). Every handle it holds must be the read-only one.`
+    );
+  }
+  if (source.includes("studentAcademicRecords")) {
+    problems.push(
+      `${DIAGNOSTIC} names the shared academic record. Only ResultPeak's own ` +
+        `api/_lib/academicRecords.js may name that collection.`
+    );
+  }
+  return problems;
+}
+
+test("the diagnostic writes nothing and keeps the read-only handle", () => {
+  assert.deepEqual(diagnosticViolations(readPure(DIAGNOSTIC)), []);
+});
+
+test("the diagnostic scan rejects what it exists to reject", () => {
+  const clean = readPure(DIAGNOSTIC);
+
+  // Not vacuous: each of these is a real way this file could go wrong, and each
+  // one has to be caught by the scan rather than by somebody reading the diff.
+  assert.equal(diagnosticViolations(`${clean}\nawait db.doc("x/y").set({});`).length, 1);
+  assert.equal(diagnosticViolations(`${clean}\nconst b = db.batch();`).length, 1);
+  assert.equal(diagnosticViolations(`${clean}\nsnap.docs[0].ref.delete();`).length, 1);
+  assert.equal(
+    diagnosticViolations(clean.replace("readOnlyDb(getFirestore())", "getFirestore()")).length,
+    1,
+    "unwrapping the handle must fail even though the file still writes nothing"
+  );
+  assert.equal(
+    diagnosticViolations(`${clean}\nconst raw = getFirestore();`).length,
+    1,
+    "a second, unwrapped handle must fail even though the first is still wrapped"
+  );
+  // Reading it is refused as well as writing it. The shared record is not this
+  // diagnostic's business at all, and `.get()` on its own trips nothing.
+  assert.equal(
+    diagnosticViolations(`${clean}\nawait db.collection("studentAcademicRecords").get();`).length,
+    1
+  );
 });

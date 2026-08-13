@@ -56,6 +56,39 @@ Every query the assessment feature adds is equality-only, sorted in memory, and
 | Class activity feed | `jdNotifications` where `schoolId`, `audience`, `targetId` | `createdAt` in memory |
 | Admin settings, observed sessions | `exams` where `schoolId`; `results` where `schoolId` | tallied in memory |
 
+### The pre-pilot term and session diagnostic
+
+`scripts/diagnose-term-session.ts` scans four collections and needs **no index
+either**. Each scan is one equality filter on `schoolId`, ordered by document id
+so the paging cursor needs no data field, projected with `select()` to the two
+fields it reports on:
+
+| Collection | Query |
+|---|---|
+| `assignments` | `schoolId ==`, `orderBy(__name__)`, `select(term, session)` |
+| `submissions` | `schoolId ==`, `orderBy(__name__)`, `select(term, session)` |
+| `exams` | `schoolId ==`, `orderBy(__name__)`, `select(term, academicSession)` |
+| `results` | `schoolId ==`, `orderBy(__name__)`, `select(term, academicSession)` |
+
+Ordering by `__name__` is the point. Firestore's automatic single-field index is
+`(field ASC, __name__ ASC)`, so an equality filter plus a document-id sort is
+served by it, while the obvious `orderBy("createdAt")` cursor would have needed a
+composite index for each of the four.
+
+**Verified against the real project read-only at `limit(1)` on 2026-08-13**, the
+same method as the 2026-08-10 run below, with the same control to prove the probe
+can still detect the condition:
+
+| Query | Result |
+|---|---|
+| All four shapes above | **OK, no index** |
+| Control: `results` with `schoolId ==` + range + `orderBy` on another field | `FAILED_PRECONDITION` as expected |
+
+The probe was deleted once it had answered. It is not in the repo and should not
+be added to it: it costs four reads and takes a minute to rewrite, and a
+committed probe becomes a script somebody runs against production without
+thinking about why.
+
 ### Why the CA query filters on `session` as well as `term`
 
 A Nigerian school year spans two calendar years, and ResultPeak's own

@@ -12,6 +12,7 @@
     "seed:topics": "tsx scripts/seed-topics.ts",
     "backfill:payload": "tsx scripts/backfill-student-payload.ts",
     "diagnose:tutor": "tsx scripts/diagnose-tutor.ts",
+    "diagnose:terms": "tsx scripts/diagnose-term-session.ts",
     "list:tutors": "tsx scripts/list-tutors.ts",
     "list:students": "tsx scripts/list-students.ts",
     "assign:logins": "tsx scripts/assign-student-logins.ts"

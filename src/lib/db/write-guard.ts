@@ -20,6 +20,29 @@ export function assertWritable(collectionPath: string): void {
 }
 
 /**
+ * Refuse a write that was reached through a read-only handle.
+ *
+ * `assertWritable` FIRST, and that order is the whole point. A ResultPeak path
+ * gets the ownership message, because "you are writing somebody else's data" is
+ * the thing a reader needs to know before "this handle happens to be read-only":
+ * the second reads like a local setting that could be turned off, and the first
+ * does not. A JDSmartLearn path falls through to the read-only refusal below,
+ * so a diagnostic cannot quietly become a migration of our own collections
+ * either.
+ *
+ * Never returns. See `db/read-only.ts` for what calls it.
+ */
+export function assertNoWrite(collectionPath: string, method: string): never {
+  assertWritable(collectionPath);
+  throw new Error(
+    `Refusing ${method}() on "${collectionPath}". This Firestore handle is ` +
+      `read-only: it belongs to a diagnostic, which reports what is wrong and ` +
+      `repairs nothing. If a repair is genuinely wanted, write it as its own ` +
+      `tool with its own review, rather than adding a write here.`
+  );
+}
+
+/**
  * AN ALLOWLIST, AND IT MUST STAY ONE.
  *
  * This names what JDSmartLearn owns and refuses everything else by default. It
