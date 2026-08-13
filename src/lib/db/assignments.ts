@@ -2,8 +2,7 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { JD, LIST_LIMIT, QUERY_LIMIT } from "./collections";
 import { assertWritable } from "./write-guard";
-import { resolveAllowedFileTypes } from "@/lib/storage/file-types";
-import type { Assignment, StudentAssignment } from "@/types/student-dashboard";
+import type { Assignment } from "@/types/student-dashboard";
 
 /**
  * Assignments: the tutor-owned half of the assessment loop.
@@ -64,29 +63,11 @@ export async function listActiveAssignmentsForClass(schoolId: string, classId: s
 /**
  * The student-safe projection of an assignment.
  *
- * Names every field rather than spreading `Assignment`, so `markingGuide` cannot
- * be copied in by accident. `StudentAssignment` has no field it could occupy.
- * This is the same defence as toStudentPayload() on lessons, and it is the only
- * way an assignment may reach a student device or a student response.
+ * Re-exported from `assessment/projection.ts`, which carries no `server-only`
+ * so the guarantee that `markingGuide` never reaches a student can be tested
+ * against the real function. Callers keep importing it from here.
  */
-export function toStudentAssignment(a: Assignment): StudentAssignment {
-  return {
-    assignmentId: a.id,
-    title: a.title,
-    description: a.description,
-    subjectId: a.subjectId,
-    subjectName: a.subjectName,
-    type: a.type,
-    dueDate: a.dueDate,
-    maxMarks: a.maxMarks,
-    linkedLessonId: a.linkedLessonId,
-    // Resolved HERE, once. A null on the document means "the tutor never chose",
-    // and every student surface downstream gets a concrete list instead of
-    // having to decide for itself what a missing value meant.
-    allowedFileTypes: resolveAllowedFileTypes(a.allowedFileTypes),
-    revision: a.updatedAt,
-  };
-}
+export { toStudentAssignment } from "@/lib/assessment/projection";
 
 /**
  * How long after the due date a submission is still accepted.

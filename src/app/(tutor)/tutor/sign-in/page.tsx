@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
 import { clientAuth } from "@/lib/firebase/client";
 
@@ -32,7 +32,17 @@ export default function TutorSignIn() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken }),
       });
-      if (!res.ok) throw new Error("session");
+      if (!res.ok) {
+        // The password was right but the account may not act (deactivated, no
+        // school, still on a temporary password). The server names the reason;
+        // show it rather than a generic failure, because "try again" is exactly
+        // the wrong advice and every tutor page would bounce back here anyway.
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        await signOut(clientAuth).catch(() => {});
+        setError(body?.error ?? "Signing in didn't finish. Try again.");
+        setBusy(false);
+        return;
+      }
       router.push("/tutor");
     } catch (err) {
       if (err instanceof FirebaseError) {

@@ -44,12 +44,21 @@ import {
   type SweepCandidate,
 } from "../src/lib/assessment/grading-recovery";
 import { SKIP_ORDER, SKIP_TEXT, detectSkips } from "../src/lib/assessment/skips";
+import { claimRefusal } from "../src/lib/auth/claims";
+import {
+  toStudentAssignment,
+  toStudentSubmissionPayload,
+} from "../src/lib/assessment/projection";
 import {
   DEFAULT_ALLOWED_FILE_TYPES,
+  MAX_SUBMISSION_FILE_BYTES,
   SUBMITTABLE_TYPES,
+  extensionOf,
+  rejectAttachment,
   resolveAllowedFileTypes,
 } from "../src/lib/storage/file-types";
-import type { SyncIndexEntry } from "../src/types";
+import type { Claims, SyncIndexEntry } from "../src/types";
+import type { Assignment, AssignmentSubmission } from "../src/types/student-dashboard";
 
 function entry(over: Partial<SyncIndexEntry> = {}): SyncIndexEntry {
   return {
@@ -461,6 +470,81 @@ test("assertRecordFields refuses every ResultPeak-owned field", () => {
   }
 });
 
+test("assertRecordFields refuses an unknown field root, not just ResultPeak's", () => {
+  // The point of an allowlist. A guard that enumerated the other platform's
+  // fields would let every one of these through, and would need editing each
+  // time ResultPeak invented a field.
+  for (const key of ["foo", "notes", "continuousAssessmentX", "CONTINUOUSASSESSMENT"]) {
+    assert.throws(
+      () => assertRecordFields({ [key]: 1 }),
+      /Refusing to write/,
+      `expected ${key} to be refused`
+    );
+  }
+  // And it does not blame ResultPeak for a field neither platform has heard of.
+  assert.throws(
+    () => assertRecordFields({ foo: 1 }),
+    /is not one of them/,
+    "an unknown root must not be attributed to ResultPeak"
+  );
+});
+
+test("assertRecordFields refuses a bad value reached by a dotted path", () => {
+  // The dotted forms are the same write as the nested one; Firestore deep-merges
+  // either way. Checking only `update.continuousAssessment` skipped all of these
+  // and let a raw mark, a string, and a map-where-a-number-belongs straight
+  // through into a document the other platform reads as report card input.
+  assert.throws(
+    () => assertRecordFields({ "continuousAssessment.biology": { exam: 9999 } }),
+    /percentages from 0 to 100/
+  );
+  assert.throws(
+    () => assertRecordFields({ "continuousAssessment.biology.exam": 9999 }),
+    /percentages from 0 to 100/
+  );
+  assert.throws(
+    () => assertRecordFields({ "continuousAssessment.biology.exam": "hack" }),
+    /not a number/
+  );
+  assert.throws(
+    () => assertRecordFields({ "continuousAssessment.biology": 72 }),
+    /expected a map of/
+  );
+  // Accepted: the same score, correctly shaped, at each of the three depths.
+  for (const update of [
+    { continuousAssessment: { biology: { exam: 72 } } },
+    { "continuousAssessment.biology": { exam: 72 } },
+    { "continuousAssessment.biology.exam": 72 },
+  ]) {
+    assert.doesNotThrow(() => assertRecordFields(update));
+  }
+});
+
+test("assertRecordFields refuses a path that runs past the end of a field", () => {
+  assert.throws(
+    () => assertRecordFields({ "continuousAssessment.a.b.c": 1 }),
+    /reaches past the end of it/
+  );
+  assert.throws(
+    () => assertRecordFields({ "lastUpdatedByLMS.x": 1 }),
+    /reaches past the end of it/
+  );
+  assert.throws(
+    () => assertRecordFields({ "continuousAssessment..exam": 1 }),
+    /empty path segment/
+  );
+});
+
+test("assertRecordFields refuses a map where a scalar belongs", () => {
+  // A map here deep-merges too, and both platforms read lastUpdatedByLMS as a
+  // timestamp.
+  assert.throws(
+    () => assertRecordFields({ lastUpdatedByLMS: { nested: true } }),
+    /expected a timestamp number/
+  );
+  assert.throws(() => assertRecordFields({ schoolId: "" }), /non-empty string/);
+});
+
 test("assertRecordFields refuses a flat number per subject", () => {
   // The old shape. ResultPeak models CA as several named components per subject,
   // so a single blended number could never be placed in any of its columns.
@@ -821,6 +905,69 @@ test("a chosen list is passed through exactly, as a copy", () => {
   );
 });
 
+test("a file type outside the assignment's list is rejected", () => {
+  // The server calls exactly this. A tutor who ticked only .pdf must not receive
+  // a .png, however the request was built.
+  const onlyPdf = [".pdf"];
+  assert.equal(rejectAttachment({ name: "work.pdf", size: 1000 }, onlyPdf), null);
+  assert.match(
+    rejectAttachment({ name: "photo.png", size: 1000 }, onlyPdf) ?? "",
+    /not a file type your teacher accepts/
+  );
+  // Named in the message, so a student with three files knows which to replace.
+  assert.match(
+    rejectAttachment({ name: "photo.png", size: 1000 }, onlyPdf) ?? "",
+    /photo\.png/
+  );
+});
+
+test("a type no assignment could allow is rejected even if it is on the list", () => {
+  // Two gates. A stored list containing ".exe" - a hand-edited document, or a
+  // request that reached the tutor route before it filtered - still cannot get an
+  // executable past the submittable set, because nothing can read one.
+  assert.match(
+    rejectAttachment({ name: "payload.exe", size: 10 }, [".exe", ".pdf"]) ?? "",
+    /not a file type your teacher accepts/
+  );
+});
+
+test("the extension is taken from the LAST dot", () => {
+  // "answer.pdf.exe" is an .exe. Checking the first extension would accept a
+  // name chosen to look like a document.
+  assert.equal(extensionOf("answer.pdf.exe"), ".exe");
+  assert.equal(extensionOf("answer.PDF"), ".pdf");
+  assert.equal(extensionOf("noextension"), "");
+  assert.equal(extensionOf(".hidden"), "", "a leading dot is not an extension");
+  assert.match(
+    rejectAttachment({ name: "answer.pdf.exe", size: 10 }, [".pdf"]) ?? "",
+    /not a file type/
+  );
+});
+
+test("an empty allowed list refuses every file, a null list accepts the defaults", () => {
+  // The distinction the whole helper exists for. [] is a tutor's decision that
+  // this assignment is typed answers only; null is no decision at all.
+  assert.match(
+    rejectAttachment({ name: "work.pdf", size: 10 }, []) ?? "",
+    /not a file type your teacher accepts/
+  );
+  assert.equal(rejectAttachment({ name: "work.pdf", size: 10 }, null), null);
+  assert.equal(rejectAttachment({ name: "work.pdf", size: 10 }, undefined), null);
+});
+
+test("an oversized file is refused before its type is considered", () => {
+  const message = rejectAttachment(
+    { name: "huge.pdf", size: MAX_SUBMISSION_FILE_BYTES + 1 },
+    [".pdf"]
+  );
+  assert.match(message ?? "", /too large/);
+  assert.equal(
+    rejectAttachment({ name: "fine.pdf", size: MAX_SUBMISSION_FILE_BYTES }, [".pdf"]),
+    null,
+    "exactly at the limit is allowed"
+  );
+});
+
 test("nothing is offered that the grading path cannot read", () => {
   // extract/text.ts handles pdf, docx and txt; images go to the vision path.
   // Anything else would be offered to a tutor and then grade as a blank answer.
@@ -834,21 +981,232 @@ test("nothing is offered that the grading path cannot read", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Module boundary: the pure assessment modules stay pure
+// The student-safe projections: no guide, and no score before release
+// ---------------------------------------------------------------------------
+
+/** A fully graded submission, as it sits on the document before release. */
+function graded(over: Partial<AssignmentSubmission> = {}): AssignmentSubmission {
+  return {
+    id: "a1_st1",
+    schoolId: "capstone",
+    assignmentId: "a1",
+    studentId: "st1",
+    classId: "c1",
+    subjectId: "biology",
+    term: "First Term" as AssignmentSubmission["term"],
+    session: "2025/2026" as AssignmentSubmission["session"],
+    tutorId: "t1",
+    assignmentTitle: "Photosynthesis",
+    subjectName: "Biology",
+    maxMarks: 20,
+    submittedAt: 1000,
+    content: "My answer",
+    attachments: [],
+    status: "ai_graded",
+    gradingAttempts: 1,
+    lastGradingAttemptAt: 1000,
+    aiScore: 17,
+    aiMaxScore: 20,
+    aiConfidence: "high",
+    aiFeedback: "Good work",
+    aiStrengths: ["clear"],
+    aiImprovements: ["add detail"],
+    topicsMastered: ["light"],
+    topicsToRevise: ["chlorophyll"],
+    teacherScore: null,
+    teacherComment: "not for the child yet",
+    finalScore: 17,
+    finalisedAt: null,
+    updatedAt: 1000,
+    ...over,
+  };
+}
+
+/** Every field the projection must withhold until a tutor releases the mark. */
+const WITHHELD = [
+  "finalScore",
+  "finalisedAt",
+  "feedback",
+  "strengths",
+  "improvements",
+  "topicsToRevise",
+  "topicsMastered",
+  "teacherComment",
+] as const;
+
+test("an unrecognised status leaks no AI score to the student projection", () => {
+  // The point of testing `status === "finalised"` positively. A status from an
+  // older or newer build, or a hand-edited document, must withhold the mark
+  // rather than fall through to it because nobody added it to a denylist.
+  const unknown = graded({
+    status: "some_future_status" as AssignmentSubmission["status"],
+  });
+  const view = toStudentSubmissionPayload(unknown, [{ topic: "x", lessonId: null }]);
+
+  for (const field of WITHHELD) {
+    assert.equal(view[field], null, `${field} leaked on an unrecognised status`);
+  }
+  // The status itself still travels: the child is told their work is in.
+  assert.equal(view.status, "some_future_status");
+});
+
+test("no status except finalised releases a mark", () => {
+  const statuses: AssignmentSubmission["status"][] = [
+    "submitted",
+    "ai_grading",
+    "ai_graded",
+    "ai_grading_failed",
+    "teacher_reviewed",
+  ];
+  for (const status of statuses) {
+    const view = toStudentSubmissionPayload(graded({ status }), [
+      { topic: "x", lessonId: null },
+    ]);
+    for (const field of WITHHELD) {
+      assert.equal(view[field], null, `${field} leaked at status ${status}`);
+    }
+  }
+
+  // And finalised does release it, so the test above is not vacuous.
+  const released = toStudentSubmissionPayload(
+    graded({ status: "finalised", finalisedAt: 2000 })
+  );
+  assert.equal(released.finalScore, 17);
+  assert.equal(released.feedback, "Good work");
+  assert.equal(released.teacherComment, "not for the child yet");
+});
+
+test("a stuck or failed submission carries no number at all", () => {
+  // CLAUDE.md: two failed attempts hand the work to the tutor. The child must
+  // see status text and nothing resembling a score.
+  const failed = toStudentSubmissionPayload(graded({ status: "ai_grading_failed" }));
+  const serialized = JSON.stringify(failed);
+  assert.ok(!serialized.includes("17"), "the AI score appears in the payload");
+  assert.ok(!/aiScore|aiConfidence|aiMaxScore/.test(serialized), "an AI field survived");
+});
+
+test("the student assignment projection has no field a marking guide could occupy", () => {
+  const safe = toStudentAssignment({
+    id: "a1",
+    schoolId: "capstone",
+    classId: "c1",
+    className: "JSS 3",
+    subjectId: "biology",
+    subjectName: "Biology",
+    tutorId: "t1",
+    title: "Photosynthesis",
+    description: "Answer in your own words",
+    type: "written",
+    dueDate: 5000,
+    maxMarks: 20,
+    markingGuide: "SECRET-GUIDE-TEXT",
+    linkedLessonId: null,
+    allowedFileTypes: null,
+    term: "First Term" as Assignment["term"],
+    session: "2025/2026" as Assignment["session"],
+    isActive: true,
+    createdAt: 1,
+    updatedAt: 2,
+  });
+
+  assert.ok(
+    !JSON.stringify(safe).includes("SECRET-GUIDE-TEXT"),
+    "the marking guide reached a student projection"
+  );
+  assert.ok(!("markingGuide" in safe), "the projection has a markingGuide key");
+  assert.ok(!("tutorId" in safe), "the projection carries the tutor id");
+  // null resolves to the default here, once, so no student surface has to.
+  assert.deepEqual(safe.allowedFileTypes, [...DEFAULT_ALLOWED_FILE_TYPES]);
+});
+
+// ---------------------------------------------------------------------------
+// claimRefusal: a claim comparison alone is not an authorization check
+// ---------------------------------------------------------------------------
+
+/** A claim set as ResultPeak stamps it on a working tutor. */
+function claims(over: Partial<Claims> = {}): Partial<Claims> {
+  return { role: "tutor", schoolId: "capstone", active: true, ...over };
+}
+
+test("a working tutor is allowed", () => {
+  assert.equal(claimRefusal(claims()), null);
+});
+
+test("a deactivated account is refused", () => {
+  assert.equal(claimRefusal(claims({ active: false })), "inactive");
+});
+
+test("a token carrying no active claim at all is refused", () => {
+  // The check reads `active !== true`, not `active === false`. Written the
+  // permissive way this passed, while ResultPeak's isActiveClaim() rejected it:
+  // the two disagreeing in that direction is the whole 2026-08-12 incident.
+  assert.equal(claimRefusal({ role: "tutor", schoolId: "capstone" }), "inactive");
+});
+
+test("a temporary password is refused even though the account reads active", () => {
+  // ResultPeak's password reset preserves the claims and sets active: true, so
+  // schoolId and active both still say yes. Only mustChangePassword says no.
+  const stillOnTempPassword = claims({
+    role: "schooladmin",
+    superadmin: true,
+    mustChangePassword: true,
+  });
+  assert.equal(stillOnTempPassword.active, true, "the trap: it still reads active");
+  assert.equal(claimRefusal(stillOnTempPassword), "must_change_password");
+});
+
+test("an admin gets no exemption from any of it", () => {
+  // The admin branch of assertClassAccess returns early, so an admin admitted
+  // by mistake reaches every class in the school. Refusal is judged with no
+  // regard for role, which is what keeps that branch out of reach.
+  const admin: Partial<Claims> = { role: "schooladmin", superadmin: true, schoolId: "capstone" };
+  assert.equal(claimRefusal({ ...admin, active: false }), "inactive");
+  assert.equal(
+    claimRefusal({ ...admin, active: true, mustChangePassword: true }),
+    "must_change_password"
+  );
+});
+
+test("an invited admin with no school yet is refused for the right reason", () => {
+  // ResultPeak's "invited" state: role and active are set, schoolId is not.
+  // The reason drives the message, so naming it wrongly sends the teacher to
+  // change a password that is not the problem.
+  assert.equal(
+    claimRefusal({ role: "schooladmin", active: true, mustChangePassword: true }),
+    "no_school"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Module boundary: the pure modules stay pure
 // ---------------------------------------------------------------------------
 
 /**
  * These modules are deliberately NOT marked `server-only`, so this file can
- * exercise the real rules that decide a child's mark rather than a copy of them.
- * That freedom is what this test pays for: nothing in them may reach the Admin
- * SDK, a secret, or a module that does.
+ * exercise the real rules that decide a child's mark, or decide whether an
+ * account may act at all, rather than a copy of them. That freedom is what this
+ * test pays for: nothing in them may reach the Admin SDK, a secret, or a module
+ * that does.
  *
- * Add a module here when you add one to the folder.
+ * Add a module here the moment you drop `server-only` from one, wherever it
+ * lives. The list is not folder-scoped, and a module missing from it is not
+ * merely untested: an unlisted module is not a legal value-import target for
+ * anything on the list either.
  */
 const PURE_MODULES = [
   "src/lib/assessment/ca.ts",
   "src/lib/assessment/grading-recovery.ts",
   "src/lib/assessment/skips.ts",
+  // The two student-safe projections. These decide whether a marking guide or an
+  // unreleased AI score can reach a child's phone, so of everything on this list
+  // they are the ones most worth testing against the real function.
+  "src/lib/assessment/projection.ts",
+  // Not assessment: the claim check behind every tutor request. Pure for the
+  // same reason, and the same rules apply to it.
+  "src/lib/auth/claims.ts",
+  // Reached as a value import by projection.ts, so it must be held to the rules
+  // too or that import would not be legal.
+  "src/lib/storage/file-types.ts",
 ];
 
 /** Never importable, as a type or otherwise. */
@@ -943,7 +1301,7 @@ function readPure(rel: string): string {
   return readFileSync(path.resolve(process.cwd(), rel), "utf8");
 }
 
-test("the pure assessment modules import nothing server-side", () => {
+test("the pure modules import nothing server-side", () => {
   for (const rel of PURE_MODULES) {
     assert.deepEqual(importViolations(rel, readPure(rel)), []);
   }
@@ -951,6 +1309,9 @@ test("the pure assessment modules import nothing server-side", () => {
   // Not vacuous: the parser really does see the imports these files have.
   assert.deepEqual(importsOf(readPure("src/lib/assessment/ca.ts")), [
     { spec: "@/types/student-dashboard", typeOnly: true },
+  ]);
+  assert.deepEqual(importsOf(readPure("src/lib/auth/claims.ts")), [
+    { spec: "@/types", typeOnly: true },
   ]);
   assert.ok(
     importsOf(readPure("src/lib/assessment/skips.ts")).some(

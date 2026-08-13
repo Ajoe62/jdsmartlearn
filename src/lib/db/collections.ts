@@ -88,8 +88,19 @@ export const RESULTPEAK_OWNED = new Set<string>([
 
 /**
  * The ONLY keys JDSmartLearn may put in a `studentAcademicRecords` write.
- * `continuousAssessment` is written as the dotted path
- * `continuousAssessment.{subjectId}` so one subject's mark never replaces the map.
+ *
+ * This list is the ALLOWLIST, not half of a pair. `assertRecordFields()` refuses
+ * every root that is not here, at every depth, and deliberately knows nothing
+ * about which fields ResultPeak owns. Adding a name here widens what this repo
+ * may write to a document a paying school's report cards are built from, so it
+ * is not a routine edit.
+ *
+ * `continuousAssessment` is written as a NESTED MAP with `set(..., { merge: true })`,
+ * not as a dotted path: `set()` reads a key literally, so a dotted key would
+ * create a field whose name contains a dot. Only `update()` reads dots as paths.
+ * See the numbered note on `writeContinuousAssessment` in `db/academic-records.ts`.
+ * The guard accepts either form, because a later `update()` would be legitimate
+ * and must be checked just as strictly.
  *
  * Runtime source of truth for `assertRecordFields()`. Lives here rather than in
  * `types/`, because the scripts import this module by relative path and cannot

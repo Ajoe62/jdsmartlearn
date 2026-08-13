@@ -16,3 +16,11 @@ const ADMIN_ROLES: ReadonlySet<string> = new Set(["schooladmin", "admin"]);
 export function isAdmin(claims: Pick<Claims, "role" | "superadmin">): boolean {
   return claims.superadmin === true || ADMIN_ROLES.has(claims.role);
 }
+
+/**
+ * Re-exported so every caller still reaches role logic through this one module.
+ * It LIVES in lib/auth/claims because that file carries no "server-only" and
+ * can therefore be tested against directly; see the note at the top of it.
+ */
+export { claimRefusal } from "@/lib/auth/claims";
+export type { ClaimRefusal } from "@/lib/auth/claims";

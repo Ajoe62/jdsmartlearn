@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { STORE, getAll } from "@/lib/offline/db";
 import type { QueuedSubmission, StoredAssignment, StoredSubmission } from "@/lib/offline/db";
 import { discardSubmission, queuedSubmissions } from "@/lib/offline/submissions";
-import { ASSIGNMENT_TABS, IN_PROGRESS_STATUSES } from "@/types/student-dashboard";
+import { ASSIGNMENT_TABS } from "@/types/student-dashboard";
 import type {
   AssignmentListItem,
   AssignmentTab,
@@ -193,7 +193,7 @@ export default function AssignmentsView({
                 {tab === "submitted" && (
                   <p className="mt-2 text-sm text-slate">
                     Sent {dateText(item.submittedAt ?? item.dueDate)} &middot;{" "}
-                    {STATUS_TEXT[item.status ?? "submitted"]}
+                    {statusText(item.status ?? "submitted")}
                   </p>
                 )}
 
@@ -216,10 +216,20 @@ export default function AssignmentsView({
   );
 }
 
+/**
+ * The three tabs PARTITION the list: no submission, released, everything else.
+ *
+ * "Everything else" is deliberately the leftover rather than a list of the
+ * in-progress statuses. Matching against `IN_PROGRESS_STATUSES` meant a status
+ * this build has never heard of belonged to no tab at all, so a child's
+ * submitted work simply vanished from their screen. Only `finalised` may reach
+ * the Marked tab, which is the property that actually matters, and it is tested
+ * positively here rather than by listing everything that is not it.
+ */
 function inTab(item: AssignmentListItem, tab: AssignmentTab): boolean {
   if (tab === "pending") return item.status === null;
   if (tab === "graded") return item.status === "finalised";
-  return item.status !== null && IN_PROGRESS_STATUSES.includes(item.status);
+  return item.status !== null && item.status !== "finalised";
 }
 
 const TAB_LABELS: Record<AssignmentTab, string> = {
@@ -249,6 +259,18 @@ const STATUS_TEXT: Record<SubmissionStatus, string> = {
   teacher_reviewed: "Waiting for your teacher",
   finalised: "Marked",
 };
+
+/**
+ * What a status not in that map renders as.
+ *
+ * A device store written by an older or newer build can hold a status this one
+ * has never seen, and an unchecked lookup rendered an empty cell. It falls back
+ * to the waiting wording rather than anything mentioning a mark: the only unsafe
+ * answer here is one that implies a score exists.
+ */
+function statusText(status: SubmissionStatus): string {
+  return STATUS_TEXT[status] ?? "Waiting for your teacher";
+}
 
 /** Short and plain. A student needs the day, not a timestamp. */
 function dateText(ms: number): string {

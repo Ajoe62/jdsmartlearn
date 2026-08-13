@@ -7,10 +7,8 @@ import { getAssignment } from "@/lib/db/assignments";
 import { listSubmissionsForAssignment } from "@/lib/db/submissions";
 import { getStudentsInClass } from "@/lib/db/resultpeak";
 import { usernamesForStudents } from "@/lib/db/student-logins";
-import { getCurrentTermSession } from "@/lib/db/school-settings";
-import { getSchool } from "@/lib/db/resultpeak";
-import { gradingEnabled, sweepAssignment } from "@/lib/db/grading-sweep";
-import { detectSkips } from "@/lib/assessment/skips";
+import { sweepAssignment } from "@/lib/db/grading-sweep";
+import { getSchoolSkips } from "@/lib/db/skips";
 import SkipNotices from "@/components/tutor/SkipNotices";
 import SubmissionReview from "@/components/tutor/SubmissionReview";
 import type { TutorSubmissionRow } from "@/types/student-dashboard";
@@ -42,13 +40,6 @@ export default async function SubmissionsPage({
     return <NotFound />;
   }
 
-  const [submissions, students, settings, school] = await Promise.all([
-    listSubmissionsForAssignment(session.schoolId, assignmentId),
-    getStudentsInClass(session.schoolId, assignment.classId),
-    getCurrentTermSession(session.schoolId),
-    getSchool(session.schoolId),
-  ]);
-
   /**
    * Everything currently stopping this school's marks getting through, worked
    * out here rather than left for a tutor to discover from a blank column on a
@@ -58,14 +49,15 @@ export default async function SubmissionsPage({
    * no assessment type mapped, and a tutor who fixes only what they were shown
    * will think they are done. Same no-fallback rule as the sync itself - an
    * unset or missing mapping is reported, never substituted.
+   *
+   * Gathered by `getSchoolSkips`, shared with the assignments page, so the two
+   * cannot report different problems for the same school.
    */
-  const knownTypes =
-    (school as { assessmentTypes?: { value: string }[] } | null)?.assessmentTypes ?? [];
-  const skips = detectSkips({
-    gradingEnabled: gradingEnabled(),
-    settings,
-    knownAssessmentTypeIds: knownTypes.map((t) => t.value),
-  });
+  const [submissions, students, skips] = await Promise.all([
+    listSubmissionsForAssignment(session.schoolId, assignmentId),
+    getStudentsInClass(session.schoolId, assignment.classId),
+    getSchoolSkips(session.schoolId),
+  ]);
 
   /**
    * Retry any marking whose trigger never landed. PULL ON DEMAND: this is the

@@ -11,18 +11,59 @@ Firebase emulator first.
 // ---------- JDSmartLearn ----------
 // No public read branch on anything here. Student-facing content is served
 // through server routes using the Admin SDK, not direct client reads.
+//
+// ============================================================================
+// A CLAIM COMPARISON ALONE IS NOT AN AUTHORIZATION CHECK. ACTIVE MUST BE
+// CHECKED TOO.
+//
+// `request.auth.token.schoolId == resource.data.schoolId`, with or without a
+// `tutorId == request.auth.uid` beside it, is TRUE FOR A DEACTIVATED TUTOR.
+// Deactivation clears `active` on the custom claims; it does not delete the
+// Firebase account, it does not change the token's `schoolId`, and it does not
+// unstamp that person's uid from documents they created. So the two things the
+// comparison tests both keep passing after the person is removed from the
+// school.
+//
+// INCIDENT, 2026-08-12. ResultPeak's tests/firestore.rules.test.mjs caught this
+// in the deployed rules and traced it back to this file, which is where the
+// pattern was written. Every JDSmartLearn block used the bare comparison:
+// topics and lessons, live for weeks, plus assignments, submissions and
+// jdNotifications added with the assessment work. A tutor removed from a school
+// kept reading every assignment they had ever set, MARKING GUIDES INCLUDED, and
+// every submission and notification hanging off them. ResultPeak has fixed its
+// deployed rules; this file is the fix at the source.
+//
+// THE FIX IS TO CALL THE HELPERS BY NAME. Never re-inline the comparison, not
+// even "just for this one collection" - a copy of an inlined block is how this
+// spread across five collections in the first place.
+//
+//   isActiveClaim()            active == true AND mustChangePassword != true
+//   isTutor(schoolId)          isActiveClaim() + role 'tutor' + school match
+//   isSchoolAdmin(schoolId)    superadmin, claims school admin, or legacy admin
+//   isMember(schoolId)         isSchoolAdmin(schoolId) || isTutor(schoolId)
+//
+// All four exist in the canonical firestore.rules in the ResultPeak repo (the
+// primitives block near the top of the file) and are verified against it as of
+// 2026-08-12. Before adding a helper to a block here, confirm it exists THERE:
+// this file is copied into that repo, and a call to a helper that does not
+// exist fails to compile and blocks the whole deploy, taking the working rules
+// with it.
+//
+// Every field read goes through `.get(field, default)`. A missing field is an
+// ERROR in rules, not null, and an erroring rule denies. ResultPeak's file uses
+// this form throughout; matching it here means the block can be copied across
+// unchanged rather than translated by hand.
+// ============================================================================
 
 match /topics/{topicId} {
-  allow read: if isSignedIn()
-              && request.auth.token.schoolId == resource.data.schoolId;
+  allow read: if isMember(resource.data.get('schoolId', ''));
   allow write: if false;              // seeded/administered server-side only
 }
 
 match /lessons/{lessonId} {
-  allow read: if isSignedIn()
-              && request.auth.token.schoolId == resource.data.schoolId
-              && (isSchoolAdmin(resource.data.schoolId)
-                  || resource.data.tutorId == request.auth.uid);
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''))
+              || (isTutor(resource.data.get('schoolId', ''))
+                  && resource.data.get('tutorId', '') == request.auth.uid);
   allow write: if false;              // Admin SDK only
 }
 
@@ -31,7 +72,7 @@ match /generatedContent/{id} {
 }
 
 match /lessonViews/{id} {
-  allow read: if isSchoolAdmin(resource.data.schoolId);
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''));
   allow write: if false;
 }
 
@@ -40,13 +81,13 @@ match /studentLogins/{id} {
 }
 
 match /jdAuditLogs/{id} {
-  allow read: if isSchoolAdmin(resource.data.schoolId);
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''));
   allow create: if false;             // Admin SDK only
   allow update, delete: if false;     // append-only
 }
 
 // ---------- JDSmartLearn: assessment ----------
-// Read these three notes before changing anything below.
+// Read these four notes before changing anything below.
 //
 // 1. STUDENTS HAVE NO IDENTITY AT THIS LAYER. They sign in with school +
 //    username + access code and carry a signed cookie, not a Firebase Auth
@@ -61,18 +102,25 @@ match /jdAuditLogs/{id} {
 //    safe because no student can read the document at all, and because the
 //    server projects through toStudentAssignment() before responding. Do not
 //    add a rule that appears to hide a field; it would read as a guarantee
-//    that does not exist.
+//    that does not exist. A school admin reading `assignments` here DOES see
+//    marking guides, and that is the accepted cost of the admin branch.
 //
 // 3. ALL WRITES ARE `false`. Same as every JD collection above. A client write
 //    would skip the assignedClasses check, the due-date check, the score clamp
 //    and the audit log, all of which live in the route handlers.
+//
+// 4. TUTOR ACCESS GOES THROUGH isTutor(), NEVER A CLAIM COMPARISON. See the
+//    2026-08-12 incident note at the top of this file. A marking guide is the
+//    single most valuable thing a deactivated tutor could still read, and this
+//    is the block that let them.
 
 match /assignments/{assignmentId} {
   // Tutors read their own; admins read the whole school. Students: server only.
-  allow read: if isSignedIn()
-              && request.auth.token.schoolId == resource.data.schoolId
-              && (isSchoolAdmin(resource.data.schoolId)
-                  || resource.data.tutorId == request.auth.uid);
+  // isTutor() folds in isActiveClaim(); a bare token.schoolId comparison would
+  // stay true for a deactivated tutor and hand back the marking guide.
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''))
+              || (isTutor(resource.data.get('schoolId', ''))
+                  && resource.data.get('tutorId', '') == request.auth.uid);
   allow write: if false;              // Admin SDK only - carries a marking guide
 }
 
@@ -85,10 +133,9 @@ match /submissions/{submissionId} {
   // tutorId is denormalized onto the submission precisely so this stays a field
   // comparison. A get() on the parent assignment would bill one read per
   // document the rule evaluates.
-  allow read: if isSignedIn()
-              && request.auth.token.schoolId == resource.data.schoolId
-              && (isSchoolAdmin(resource.data.schoolId)
-                  || resource.data.tutorId == request.auth.uid);
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''))
+              || (isTutor(resource.data.get('schoolId', ''))
+                  && resource.data.get('tutorId', '') == request.auth.uid);
   // Scores are never client-written. aiScore, teacherScore and finalScore are
   // set by route handlers after the clamp to 0..maxMarks.
   allow write: if false;
@@ -99,28 +146,42 @@ match /studentProgress/{id} {
   // and a denormalized classId goes stale the moment a student changes class -
   // the same reason studentLogins deliberately has none. Tutors and students
   // both read progress through server routes that resolve the class live.
-  allow read: if isSchoolAdmin(resource.data.schoolId);
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''));
   allow write: if false;              // Admin SDK only
 }
 
 match /jdNotifications/{id} {
-  allow read: if isSignedIn()
-              && request.auth.token.schoolId == resource.data.schoolId
-              && (isSchoolAdmin(resource.data.schoolId)
-                  || (resource.data.audience == 'tutor'
-                      && resource.data.targetId == request.auth.uid));
+  // A notification names an assignment and a class, so a deactivated tutor
+  // reading their own backlog is still a leak. isTutor(), not a claim compare.
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''))
+              || (isTutor(resource.data.get('schoolId', ''))
+                  && resource.data.get('audience', '') == 'tutor'
+                  && resource.data.get('targetId', '') == request.auth.uid);
   allow write: if false;              // Admin SDK only
 }
 
 // ---------- Shared with ResultPeak: owned by NEITHER platform ----------
 // studentAcademicRecords/{schoolId}_{studentId}
 //
-// FIELD OWNERSHIP IS THE ENTIRE CONTRACT:
+// FIELD OWNERSHIP IS THE ENTIRE CONTRACT, AND EACH SIDE STATES ITS OWN HALF:
 //
-//   JDSmartLearn writes ONLY  continuousAssessment.{subjectId}.{assessmentTypeId},
-//                             lastUpdatedByLMS
-//   ResultPeak    writes ONLY  examScore.{subjectId},
-//                             lastUpdatedByAssessment
+//   JDSmartLearn writes  continuousAssessment.{subjectId}.{assessmentTypeId},
+//                        lastUpdatedByLMS
+//                        AND NOTHING ELSE.
+//
+// Each guard is an ALLOWLIST of its own fields, never a denylist of the other
+// side's. JDSmartLearn's assertRecordFields() names the two roots above and
+// refuses every other root by default, at every depth, without knowing or
+// caring which fields exist over here. ResultPeak's mirror guard should name
+// only its own roots and refuse the rest the same way.
+//
+// This is not a style preference. A guard listing the OTHER platform's fields
+// fails open: a field added on that side stays writable from the other until
+// somebody remembers to extend the list. It also drifts silently, and it already
+// had. The rules comment in this repo listed four ResultPeak-owned fields where
+// JDSmartLearn's docs listed two, for weeks, and nothing caught it because
+// nothing depended on either list being right. Both guards were unaffected
+// precisely because neither reads the other's list.
 //
 // continuousAssessment is TWO levels deep and its values are PERCENTAGES, 0 to
 // 100, never raw marks. The inner key is the assessment type's stable `value`
@@ -136,21 +197,30 @@ match /jdNotifications/{id} {
 // recovery path: the source data for continuous assessment lives in
 // JDSmartLearn's submissions, and the source for exam scores lives in results.
 match /studentAcademicRecords/{id} {
-  allow read: if isSchoolAdmin(resource.data.schoolId);
+  // schoolId is stamped on every write by BOTH guards precisely so this rule
+  // has a field to read. Without the default, a document created without it
+  // would be permanently unreadable by its own school admin.
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''));
   allow write: if false;              // both platforms, Admin SDK only
 }
 
 match /jdSchoolSettings/{schoolId} {
   // The current term and session, and which assessment type the LMS feeds.
   // A stopgap: ResultPeak records none of these anywhere today.
-  allow read: if isSignedIn() && request.auth.token.schoolId == schoolId;
+  //
+  // isMember(), not a claim comparison. Tutors read this (the skip surface on
+  // the tutor page tells them when the assessment type is unset), so the rule
+  // needs a tutor branch - and a tutor branch written as a claim compare is
+  // exactly the 2026-08-12 bug. isMember() is isSchoolAdmin() || isTutor(),
+  // and both fold in isActiveClaim().
+  allow read: if isMember(schoolId);
   allow write: if false;              // Admin SDK only, school admins only
 }
 
 match /jdCaScores/{id} {
   // JDSmartLearn's own copy of every CA score it calculated, so the shared
   // document can be rebuilt if it is ever wiped from the other side.
-  allow read: if isSchoolAdmin(resource.data.schoolId);
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''));
   allow write: if false;              // Admin SDK only
 }
 ```
@@ -232,9 +302,30 @@ deterministic id and `set` with merge, for exactly this reason.
 
 3. **The mirror guard on `studentAcademicRecords`.** JDSmartLearn enforces its
    half of the contract in `assertRecordFields()`. ResultPeak needs the same
-   check before it writes `examScore`, rejecting any key whose root is not
-   `examScore` or `lastUpdatedByAssessment`, and it must write with `merge`.
-   Until that guard exists, the contract is enforced on one side only, and a
-   single `set()` without merge from ResultPeak wipes every school's continuous
-   assessment. **Ship this guard in the ResultPeak repo before JDSmartLearn
-   writes its first CA score.**
+   check before it writes `examScore`, and it must write with `merge`. Until that
+   guard exists, the contract is enforced on one side only, and a single `set()`
+   without merge from ResultPeak wipes every school's continuous assessment.
+   **Ship this guard in the ResultPeak repo before JDSmartLearn writes its first
+   CA score.**
+
+   Write it as an **allowlist of ResultPeak's own field roots**, refusing
+   everything else by default at every depth, not as a denylist of
+   JDSmartLearn's. JDSmartLearn's guard is built that way and names only
+   `continuousAssessment` and `lastUpdatedByLMS`. Two allowlists that each know
+   only their own half cannot drift apart; two denylists inevitably do.
+
+4. **Confirm whether `combinedScore` and `grade` are still stored at all.**
+   ResultPeak's `firestore.rules` comment on `studentAcademicRecords` lists four
+   owned fields, `examScore`, `combinedScore`, `grade` and
+   `lastUpdatedByAssessment`, where every JDSmartLearn document lists two.
+
+   The likely explanation is that `combinedScore` and `grade` are leftovers from
+   the scrapped `schoolResultSettings` weighting plan and are now derived at
+   sheet-build time rather than stored. **This needs confirming on that side, and
+   if they are no longer written, the two stale names should come out of the
+   comment.** A comment naming fields nobody writes is what made the two repos
+   look like they disagreed about the contract when they did not.
+
+   Nothing in JDSmartLearn acts on this either way: its guard never reads
+   ResultPeak's list, which is exactly why the drift cost nothing. Do not "fix"
+   it by adding those names anywhere in this repo.

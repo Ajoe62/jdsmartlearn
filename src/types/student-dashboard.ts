@@ -73,14 +73,18 @@ export type SubmissionStatus =
   | "teacher_reviewed"
   | "finalised";
 
-/** Statuses the student's "Submitted" tab shows. Graded means finalised only. */
-export const IN_PROGRESS_STATUSES: SubmissionStatus[] = [
-  "submitted",
-  "ai_grading",
-  "ai_graded",
-  "ai_grading_failed",
-  "teacher_reviewed",
-];
+/**
+ * THERE IS DELIBERATELY NO `IN_PROGRESS_STATUSES` LIST HERE, and adding one back
+ * would reintroduce a bug. It existed, it enumerated the five non-finalised
+ * statuses, and the student's "Sent" tab matched against it. A status not on the
+ * list therefore belonged to no tab at all, so a child's submitted work
+ * disappeared from their screen entirely rather than showing as unmarked.
+ *
+ * The three tabs partition on the one status that matters instead: no
+ * submission is "To do", `finalised` is "Marked", everything else is "Sent". See
+ * `inTab` in components/student/AssignmentsView. Test positively for
+ * `finalised`; never maintain a list of what it is not.
+ */
 
 export type AIConfidence = "high" | "medium" | "low";
 
@@ -430,11 +434,19 @@ export interface SubjectProgressCard {
  * last-writer-wins recovery: a `set()` without merge from either side destroys
  * the other side's marks.
  *
- *   JDSmartLearn writes ONLY  continuousAssessment.{subjectId}, lastUpdatedByLMS
- *   ResultPeak    writes ONLY  examScore.{subjectId},            lastUpdatedByAssessment
+ *   JDSmartLearn writes  continuousAssessment.{subjectId}.{assessmentTypeId},
+ *                        lastUpdatedByLMS
+ *                        AND NOTHING ELSE.
  *
- * Enforced at runtime by `assertRecordFields()`, which rejects any update whose
- * key set, including dotted field paths, falls outside the LMS half. Reading the
+ * Stated as what this repo owns, not as a list of what ResultPeak owns. An
+ * allowlist of your own fields cannot go stale; a denylist of someone else's
+ * fails open the moment they add one, and the two lists had already drifted (see
+ * docs/firestore-rules-to-append.md). The fields below marked WRITTEN BY
+ * RESULTPEAK are documented for READING only, and are not the guard's input.
+ *
+ * Enforced at runtime by `assertRecordFields()`, which refuses every field root
+ * outside the LMS half AT EVERY DEPTH: a top-level key, a dotted field path and
+ * a nested key alike, since `set` with `merge` deep-merges maps. Reading the
  * ResultPeak half is fine and is what the progress page does.
  */
 export interface StudentAcademicRecord {

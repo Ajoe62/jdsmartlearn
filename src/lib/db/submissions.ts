@@ -6,16 +6,20 @@ import { assertWritable } from "./write-guard";
 import { listActiveAssignmentsForClass } from "./assignments";
 
 /**
- * Re-exported from the pure module so callers keep one import, while the rules
- * that decide a child's report-card number stay directly testable.
+ * Re-exported from the pure modules so callers keep one import, while the rules
+ * that decide a child's report-card number, and the projection that decides what
+ * reaches their phone at all, stay directly testable.
+ *
+ * Nothing here re-implements them. `toStudentSubmissionPayload` in particular
+ * lives in `assessment/projection.ts` beside `toStudentAssignment`, because the
+ * two enforce the same guarantee and a reader checking one should find the other
+ * in the same file.
  */
 export { averagePercentage, denormalizedFrom } from "@/lib/assessment/ca";
+export { linkTopics, toStudentSubmissionPayload } from "@/lib/assessment/projection";
 import type {
   AssignmentListItem,
   AssignmentSubmission,
-  AttachmentLink,
-  StudentSubmissionView,
-  TopicLink,
 } from "@/types/student-dashboard";
 
 /**
@@ -200,82 +204,5 @@ export async function buildAssignmentList(
   return items.sort((a, b) => a.dueDate - b.dueDate);
 }
 
-/**
- * Build the download links for a submission's attachments.
- *
- * The stored value is an R2 key. It is never handed to a client: the href points
- * at a route on this origin that re-checks the session, the schoolId and the
- * ownership of the submission on every request.
- */
-function toAttachmentLinks(
-  sub: Pick<AssignmentSubmission, "assignmentId" | "attachments">
-): AttachmentLink[] {
-  return sub.attachments.map((a, index) => ({
-    name: a.name,
-    type: a.type,
-    size: a.size,
-    href: `/api/student/assignments/${sub.assignmentId}/attachments/${index}`,
-  }));
-}
-
-/**
- * THE student-safe projection of a submission.
- *
- * Two guarantees, both by construction rather than by care:
- *
- *  1. No marking guide. This function never receives the assignment's guide, and
- *     `StudentSubmissionView` has no field one could occupy.
- *  2. No AI result before the tutor releases it. Every graded field is null
- *     unless status is "finalised". A high-confidence AI mark is still an
- *     unreviewed mark, and teacher review before release is mandatory
- *     (CLAUDE.md, Assessment rules).
- */
-export function toStudentSubmissionPayload(
-  sub: AssignmentSubmission,
-  topicLinks: TopicLink[] = []
-): StudentSubmissionView {
-  const released = sub.status === "finalised";
-
-  return {
-    assignmentId: sub.assignmentId,
-    assignmentTitle: sub.assignmentTitle,
-    subjectName: sub.subjectName,
-    submittedAt: sub.submittedAt,
-    status: sub.status,
-    content: sub.content,
-    attachments: toAttachmentLinks(sub),
-    maxMarks: sub.maxMarks,
-
-    finalScore: released ? sub.finalScore : null,
-    finalisedAt: released ? sub.finalisedAt : null,
-    feedback: released ? sub.aiFeedback : null,
-    strengths: released ? sub.aiStrengths : null,
-    improvements: released ? sub.aiImprovements : null,
-    topicsToRevise: released ? topicLinks : null,
-    topicsMastered: released ? sub.topicsMastered : null,
-    teacherComment: released ? sub.teacherComment : null,
-  };
-}
-
-/**
- * Match each topic to a published lesson in the same subject, so "topics to
- * revise" leads somewhere instead of naming a gap.
- *
- * Case-insensitive exact title match only. A fuzzy match that sends a child to
- * the wrong lesson is worse than plain text, and `lessonId: null` renders as
- * plain text by design.
- */
-export function linkTopics(
-  topics: string[],
-  lessons: { id: string; title: string; subjectId: string }[],
-  subjectId: string
-): TopicLink[] {
-  const inSubject = lessons.filter((l) => l.subjectId === subjectId);
-  const byTitle = new Map(inSubject.map((l) => [l.title.trim().toLowerCase(), l.id]));
-  return topics.map((topic) => ({
-    topic,
-    lessonId: byTitle.get(topic.trim().toLowerCase()) ?? null,
-  }));
-}
 
 

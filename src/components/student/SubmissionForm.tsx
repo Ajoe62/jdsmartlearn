@@ -7,6 +7,7 @@ import { STORE, del, get, put } from "@/lib/offline/db";
 import type { StoredDraft } from "@/lib/offline/db";
 import { queueSubmission } from "@/lib/offline/submissions";
 import { formatBytes } from "@/lib/format";
+import { MAX_SUBMISSION_FILES, rejectAttachment } from "@/lib/storage/file-types";
 import type { StudentAssignment } from "@/types/student-dashboard";
 
 /**
@@ -24,8 +25,6 @@ import type { StudentAssignment } from "@/types/student-dashboard";
  */
 
 const AUTOSAVE_MS = 800;
-const MAX_FILES = 3;
-const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 export default function SubmissionForm({
   assignment,
@@ -97,14 +96,22 @@ export default function SubmissionForm({
     if (!list) return;
     setError(null);
     const picked = Array.from(list);
-    const room = MAX_FILES - files.length;
+    const room = MAX_SUBMISSION_FILES - files.length;
     if (picked.length > room) {
-      setError(`You can attach ${MAX_FILES} files in total.`);
+      setError(`You can attach ${MAX_SUBMISSION_FILES} files in total.`);
       return;
     }
-    const tooBig = picked.find((f) => f.size > MAX_FILE_BYTES);
-    if (tooBig) {
-      setError(`${tooBig.name} is too large. Each file must be under 5 MB.`);
+    /**
+     * The same function the submit route enforces with, so a file the server
+     * would refuse is caught before a child on 3G waits for the upload. This is
+     * still only a courtesy: `accept` below is a hint that some browsers ignore,
+     * and the server checks every file again regardless of what happened here.
+     */
+    const refused = picked
+      .map((f) => rejectAttachment(f, assignment.allowedFileTypes))
+      .find((message): message is string => message !== null);
+    if (refused) {
+      setError(refused);
       return;
     }
     setFiles((current) => [...current, ...picked]);

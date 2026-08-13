@@ -1,4 +1,3 @@
-import { extname } from "node:path";
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { getStudentSession } from "@/lib/auth/student";
@@ -11,7 +10,11 @@ import {
   toStudentSubmissionPayload,
 } from "@/lib/db/submissions";
 import { putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
-import { resolveAllowedFileTypes } from "@/lib/storage/file-types";
+import {
+  MAX_SUBMISSION_FILES,
+  extensionOf,
+  rejectAttachment,
+} from "@/lib/storage/file-types";
 import { writeAuditLog } from "@/lib/db/lessons";
 import { gradingEnabled } from "@/lib/db/grading-sweep";
 import type { SubmissionAttachment } from "@/types/student-dashboard";
@@ -33,8 +36,6 @@ export const maxDuration = 60;
  */
 
 const MAX_CONTENT = 20_000;
-const MAX_FILES = 3;
-const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -118,8 +119,8 @@ export async function POST(req: Request) {
   if (!content && files.length === 0) {
     return bad("Write an answer or attach a file before sending.");
   }
-  if (files.length > MAX_FILES) {
-    return bad(`Attach at most ${MAX_FILES} files.`);
+  if (files.length > MAX_SUBMISSION_FILES) {
+    return bad(`Attach at most ${MAX_SUBMISSION_FILES} files.`);
   }
 
   // ----- Attachments. Uploaded before the document is written, so a failed
@@ -129,19 +130,25 @@ export async function POST(req: Request) {
     if (!storageConfigured()) {
       return bad("Attachments are not available. Type your answer instead.");
     }
-    // The same resolution toStudentAssignment() applied when it told this
-    // student what they could attach, so the form and this check agree about
-    // what a null on the document meant.
-    const allowed = resolveAllowedFileTypes(assignment.allowedFileTypes);
+    /**
+     * THE CONTROL, not the `accept` attribute on the form.
+     *
+     * `rejectAttachment` is the same function the tutor's form and the student's
+     * form are built from, so all three agree about what a null on the document
+     * meant and about which extensions exist at all. A request that never went
+     * near the file picker, or an offline submission replayed days later, is
+     * checked here exactly as a fresh one is.
+     */
     for (const file of files) {
-      if (file.size > MAX_FILE_BYTES) {
-        return bad(`${file.name} is too large. Each file must be under 5 MB.`);
-      }
-      const ext = extname(file.name).toLowerCase();
+      const refusal = rejectAttachment(file, assignment.allowedFileTypes);
+      if (refusal) return bad(refusal);
+
+      const ext = extensionOf(file.name);
       const known = STORABLE_TYPES[ext];
-      if (!known || !allowed.includes(ext)) {
-        return bad(`${file.name} is not a file type your teacher accepts.`);
-      }
+      // rejectAttachment already required a submittable extension, so this is
+      // unreachable; it stays because `known.mime` below must not be undefined
+      // if the two lists ever drift.
+      if (!known) return bad(`${file.name} is not a file type your teacher accepts.`);
       const key = `submissions/${session.schoolId}/${assignmentId}/${session.studentId}/${attachments.length}${ext}`;
       try {
         await putFile(key, Buffer.from(await file.arrayBuffer()), known.mime);

@@ -105,7 +105,7 @@ export default function SubmissionReview({
                   </span>
                   <span className="mt-1 block text-sm text-slate">
                     Sent {new Date(row.submittedAt).toDateString()} &middot;{" "}
-                    {STATUS_TEXT[row.status]}
+                    {statusText(row.status)}
                   </span>
                 </span>
                 <span className="shrink-0 text-right text-sm">
@@ -423,3 +423,13 @@ const STATUS_TEXT: Record<TutorSubmissionRow["status"], string> = {
   teacher_reviewed: "saved, not released",
   finalised: "released",
 };
+
+/**
+ * A status this build has never seen lands on the tutor, which is the right
+ * place for it: they can open the row and mark it by hand. The unchecked lookup
+ * rendered nothing at all, which reads as a row with no state rather than one
+ * needing attention.
+ */
+function statusText(status: TutorSubmissionRow["status"]): string {
+  return STATUS_TEXT[status] ?? "needs your review";
+}

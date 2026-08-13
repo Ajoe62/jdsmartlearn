@@ -24,6 +24,13 @@ export interface Claims {
   /** Newer multi-school accounts also carry every school they belong to. */
   schoolIds?: string[];
   active: boolean;
+  /**
+   * Set while the account still holds a temporary password a superadmin chose
+   * for it. ResultPeak folds this into isActiveClaim() in firestore.rules, so
+   * such an account is denied there while its `active` claim still reads true.
+   * Read it through claimRefusal() in lib/auth/roles, never inline.
+   */
+  mustChangePassword?: boolean;
   superadmin?: boolean;
 }
 

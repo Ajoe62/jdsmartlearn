@@ -2,7 +2,8 @@ import "server-only";
 import { cookies } from "next/headers";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { RP } from "@/lib/db/collections";
-import { isAdmin } from "@/lib/auth/roles";
+import { claimRefusal, isAdmin } from "@/lib/auth/roles";
+import type { ClaimRefusal } from "@/lib/auth/roles";
 import type { Claims, ResultPeakTutor } from "@/types";
 
 export interface TutorSession {
@@ -16,9 +17,23 @@ export interface TutorSession {
 
 const SESSION_COOKIE = "jd_tutor";
 
-/** Exchange a Firebase ID token for a session cookie (5 days). */
-export async function createTutorSession(idToken: string): Promise<void> {
+/**
+ * Exchange a Firebase ID token for a session cookie (5 days).
+ *
+ * Returns a refusal instead of minting the cookie when the claims are not fit
+ * to act. Refusing HERE as well as in getTutorSession() is what keeps a refused
+ * account off the sign-in bounce: every tutor page redirects to /tutor/sign-in
+ * on a null session, so an account that could sign in but not resolve a session
+ * would land back on the form with no idea why, forever.
+ */
+export async function createTutorSession(idToken: string): Promise<ClaimRefusal | null> {
   const expiresIn = 5 * 24 * 60 * 60 * 1000;
+
+  // checkRevoked so a token minted before a deactivation cannot be traded in.
+  const decoded = await adminAuth.verifyIdToken(idToken, true);
+  const refusal = claimRefusal(decoded as unknown as Partial<Claims>);
+  if (refusal) return refusal;
+
   const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn });
   (await cookies()).set(SESSION_COOKIE, sessionCookie, {
     httpOnly: true,
@@ -27,6 +42,7 @@ export async function createTutorSession(idToken: string): Promise<void> {
     maxAge: expiresIn / 1000,
     path: "/",
   });
+  return null;
 }
 
 /**
@@ -47,7 +63,16 @@ export async function getTutorSession(): Promise<TutorSession | null> {
   try {
     const decoded = await adminAuth.verifySessionCookie(cookie, true);
     const claims = decoded as unknown as Claims & { uid: string };
-    if (!claims.schoolId || claims.active === false) return null;
+    // Same predicate as the exchange above, applied again on every request.
+    //
+    // The claims in a session cookie are frozen at creation, so this does NOT
+    // see a change made since; `checkRevoked` above is what catches that, and
+    // it works because ResultPeak calls revokeRefreshTokens() on every claim
+    // change that matters (deactivation, password reset, school purge).
+    // Checking here still matters for the cookies already in the wild: a 5-day
+    // cookie minted before this check existed carries mustChangePassword and
+    // would otherwise keep working until it expired.
+    if (claimRefusal(claims)) return null;
 
     const candidateSchools = [
       claims.schoolId,
