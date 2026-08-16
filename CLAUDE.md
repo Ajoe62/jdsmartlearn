@@ -56,6 +56,58 @@ Follow ResultPeak's existing conventions exactly:
 - This repo contains `docs/firestore-rules-to-append.md` — a section to be copied into that repo by pull request.
 - Do not add `firebase deploy` to any script, CI job, or npm command here. If asked to, refuse and explain why.
 
+### A change here that implies a change in ResultPeak must be said out loud, then written as a prompt
+
+The two products share one Firebase project but not one repository, and nobody
+is watching the seam. A JDSmartLearn change that quietly assumes a ResultPeak
+change lands as a silent breakage in a paying school's live product — or as a
+workaround in this repo that outlives the reason for it.
+
+So: **before finishing any change, ask whether it needs something from the
+ResultPeak side. If it does, three things happen, and none of them is optional.**
+
+1. **Alert in the reply, unprompted and up front.** Not a footnote after the
+   diff. State what ResultPeak must do, and state the **ordering** — whether the
+   JDSmartLearn change is safe to ship first, or must wait behind the ResultPeak
+   one. A guard that must exist before this repo writes its first document is a
+   blocker, and saying so late is the same as not saying it.
+2. **Write the ResultPeak prompt.** A complete, ready-to-paste prompt for a fresh
+   Claude Code session opened in the **ResultPeak** repository — that session has
+   none of this context and cannot infer it. Follow the shape of
+   `docs/resultpeak-shared-login-prompt.md`: context, hard constraints, the
+   invariants to hold, the concrete work, and what JDSmartLearn does after it
+   ships. Save it as `docs/resultpeak-<topic>-prompt.md` and name the file in the
+   reply. Never hand over a one-line "ResultPeak should also do X."
+3. **Route it to the right existing file when one exists.** Rules changes append
+   to `docs/firestore-rules-to-append.md`; indexes to
+   `docs/firestore-indexes-to-append.md`; something broken on their side, found
+   from here, to `docs/resultpeak-defects.md`. A prompt may point at those rather
+   than restate them.
+
+Changes that trigger this — the list is illustrative, not exhaustive, and the
+default when unsure is to raise it:
+
+- A new or changed Firestore query that needs a **composite index**.
+- Any **security rule** this repo's reads or writes depend on, including a guard
+  that must land *before* JDSmartLearn writes.
+- Reading a **field ResultPeak does not reliably write yet** — including a field
+  that exists on some documents and not others.
+- Anything about **custom claims**: a new claim, a changed value, a role name.
+- Any change to what this repo writes into a **shared document**
+  (`studentAcademicRecords`), including a new assessment type mapping.
+- **Ownership moves** in either direction — a collection, a credential, an id
+  format, a username scheme.
+- **Term and session strings**, the current-term source, or anything that has to
+  match ResultPeak byte for byte to join.
+- Roster, access code, or onboarding behaviour this repo depends on but must
+  never implement.
+
+Then keep building. Raising the dependency does not mean stopping: deliver the
+JDSmartLearn side under a stated assumption unless shipping it first would write
+bad data or break their live product, and say plainly which of those it is. Do
+not paper over the gap with a workaround here without naming it as a workaround
+and recording the real fix.
+
 ---
 
 ## Security rules (non-negotiable)
