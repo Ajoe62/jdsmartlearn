@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getTutorSession } from "@/lib/auth/tutor";
 import { listLessonsForTutor, listLessonsForSchool } from "@/lib/db/lessons";
 import { getClassesByIds, getTutorNames, listClassesForSchool } from "@/lib/db/resultpeak";
+import { resultPeakUrl } from "@/lib/partner-links";
 import type { LessonStatus } from "@/types";
 
 /**
@@ -23,6 +24,12 @@ export default async function TutorDashboard() {
       : listLessonsForTutor(session.schoolId, session.uid),
     session.isAdmin ? getTutorNames(session.schoolId) : Promise.resolve(null),
   ]);
+
+  // Where the marks a tutor enters here end up. "" when ResultPeak is not
+  // configured, and then the row below is not rendered. No school in the path:
+  // staff sign in there with their own account and their claims carry schoolId,
+  // so a slug would cost a Firestore read to say what the destination knows.
+  const resultsUrl = resultPeakUrl("/admin/results");
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
@@ -52,6 +59,18 @@ export default async function TutorDashboard() {
             <Link href="/tutor/settings" className="text-sm text-marker underline">
               Assessment settings
             </Link>
+          )}
+          {resultsUrl && (
+            /* Another product on another domain, so a plain anchor rather than
+               next/link, which is for routes inside this app. */
+            <a
+              className="text-sm text-slate underline"
+              href={resultsUrl}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              Results in ResultPeak
+            </a>
           )}
         </div>
       )}

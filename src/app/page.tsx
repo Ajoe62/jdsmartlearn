@@ -1,6 +1,11 @@
 import Link from "next/link";
+import { resultPeakStaffUrl } from "@/lib/partner-links";
 
 export default function Home() {
+  // "" when ResultPeak is not configured, and then the row below is not rendered
+  // at all. See src/lib/partner-links.ts for why there is no third state.
+  const resultPeak = resultPeakStaffUrl();
+
   return (
     <main className="mx-auto max-w-readable px-5 py-16">
       <h1>
@@ -25,6 +30,23 @@ export default function Home() {
           I&rsquo;m a student
         </Link>
       </div>
+
+      {resultPeak && (
+        <p className="mt-8 border-t border-line pt-6 text-sm text-slate">
+          Looking for exams, scores or a report card?{" "}
+          {/* An external product on another domain, so a plain anchor rather
+              than next/link, which is for routes inside this app. */}
+          <a
+            className="font-medium underline"
+            href={resultPeak}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Open ResultPeak
+          </a>
+          .
+        </p>
+      )}
     </main>
   );
 }
