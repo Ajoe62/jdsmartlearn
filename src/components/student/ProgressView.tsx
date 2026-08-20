@@ -63,19 +63,19 @@ export default function ProgressView({ initial }: { initial: SubjectProgressCard
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/student" className="text-sm text-slate">
+      <Link href="/student" className="text-sm text-muted">
         Back to your subjects
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">Your progress</h1>
+      <h1 className="mt-3 text-title">Your progress</h1>
 
       {offline && (
-        <p className="mt-2 text-xs text-slate">
+        <p className="mt-2 text-xs text-muted">
           Saved on your phone. It updates when you have internet.
         </p>
       )}
 
       {list.length === 0 ? (
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+        <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
           Nothing to show yet. Read a lesson or send an assignment and your progress
           appears here.
         </p>
@@ -100,9 +100,9 @@ export default function ProgressView({ initial }: { initial: SubjectProgressCard
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-line bg-chalk p-3 text-center">
-      <p className="text-lg font-semibold">{value}</p>
-      <p className="mt-0.5 text-xs text-slate">{label}</p>
+    <div className="rounded-lg border border-line bg-surface p-3 text-center">
+      <p className="tabular text-heading font-semibold">{value}</p>
+      <p className="mt-0.5 text-xs text-muted">{label}</p>
     </div>
   );
 }
@@ -114,32 +114,32 @@ function SubjectCard({ card }: { card: SubjectProgressCard }) {
       : Math.min(100, Math.round((card.lessonsViewed / card.lessonsAvailable) * 100));
 
   return (
-    <section className="rounded-lg border border-line bg-chalk p-4">
+    <section className="rounded-lg border border-line bg-surface p-4">
       <h2 className="font-medium">{card.subjectName}</h2>
 
-      <p className="mt-3 text-sm text-slate">
+      <p className="mt-3 text-sm text-muted">
         Lessons read: {card.lessonsViewed} of {card.lessonsAvailable}
       </p>
       <div
-        className="mt-1 h-2 w-full overflow-hidden rounded-full bg-paper"
+        className="mt-1 h-2 w-full overflow-hidden rounded-full bg-canvas"
         role="progressbar"
         aria-valuenow={percent}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label={`${card.subjectName} lessons read`}
       >
-        <div className="h-full bg-marker" style={{ width: `${percent}%` }} />
+        <div className="h-full bg-brand" style={{ width: `${percent}%` }} />
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
-          <dt className="text-slate">Your average</dt>
+          <dt className="text-muted">Your average</dt>
           <dd className="font-medium">
             {card.averageScore === null ? "No marks yet" : `${card.averageScore}%`}
           </dd>
         </div>
         <div>
-          <dt className="text-slate">Counted towards your report</dt>
+          <dt className="text-muted">Counted towards your report</dt>
           <dd className="font-medium">
             {card.continuousAssessment === null
               ? "Not sent yet"
@@ -150,12 +150,12 @@ function SubjectCard({ card }: { card: SubjectProgressCard }) {
 
       {card.topicsMastered.length > 0 && (
         <div className="mt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
             You know this well
           </p>
           <ul className="mt-1 space-y-0.5 text-sm">
             {card.topicsMastered.map((topic) => (
-              <li key={topic} className="text-green-800">
+              <li key={topic} className="text-successText">
                 {topic}
               </li>
             ))}
@@ -165,7 +165,7 @@ function SubjectCard({ card }: { card: SubjectProgressCard }) {
 
       {card.topicsToRevise.length > 0 && (
         <div className="mt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
             Go over these again
           </p>
           <ul className="mt-1 space-y-0.5 text-sm">
@@ -176,14 +176,14 @@ function SubjectCard({ card }: { card: SubjectProgressCard }) {
                 {link.lessonId ? (
                   <Link
                     href={`/student/lessons/${link.lessonId}`}
-                    className="text-amber-700 underline"
+                    className="text-warn underline"
                   >
                     {link.topic}
                   </Link>
                 ) : (
                   <Link
                     href={`/student/assignments?tab=graded`}
-                    className="text-amber-700"
+                    className="text-warn"
                   >
                     {link.topic}
                   </Link>

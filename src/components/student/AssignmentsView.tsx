@@ -99,10 +99,10 @@ export default function AssignmentsView({
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/student" className="text-sm text-slate">
+      <Link href="/student" className="text-sm text-muted">
         Back to your subjects
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">Your work</h1>
+      <h1 className="mt-3 text-title">Your work</h1>
 
       <nav className="mt-5 flex gap-2" aria-label="Assignment status">
         {ASSIGNMENT_TABS.map((name) => {
@@ -115,8 +115,8 @@ export default function AssignmentsView({
               aria-current={active ? "page" : undefined}
               className={
                 active
-                  ? "rounded-lg bg-marker px-3 py-2 text-sm font-medium text-chalk"
-                  : "rounded-lg border border-line bg-chalk px-3 py-2 text-sm text-slate"
+                  ? "rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white"
+                  : "rounded-lg border border-line bg-surface px-3 py-2 text-sm text-muted"
               }
             >
               {TAB_LABELS[name]}
@@ -136,7 +136,7 @@ export default function AssignmentsView({
           {waiting.map((row) => (
             <li
               key={row.assignmentId}
-              className="rounded-lg border border-line bg-paper p-4 text-sm"
+              className="rounded-lg border border-line bg-canvas p-4 text-sm"
             >
               <p className="font-medium">{titleFor(row.assignmentId)}</p>
               {row.error ? (
@@ -145,13 +145,13 @@ export default function AssignmentsView({
                   <button
                     type="button"
                     onClick={() => void discard(row.assignmentId)}
-                    className="mt-2 font-medium text-marker"
+                    className="mt-2 font-medium text-brand"
                   >
                     Clear this
                   </button>
                 </>
               ) : (
-                <p className="mt-1 text-slate">
+                <p className="mt-1 text-muted">
                   Saved on your phone. It sends to your teacher when you have internet.
                 </p>
               )}
@@ -161,7 +161,7 @@ export default function AssignmentsView({
       )}
 
       {shown.length === 0 ? (
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+        <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
           {EMPTY[tab]}
         </p>
       ) : (
@@ -170,28 +170,28 @@ export default function AssignmentsView({
             <li key={item.assignmentId}>
               <Link
                 href={`/student/assignments/${item.assignmentId}`}
-                className="block rounded-lg border border-line bg-chalk p-4 hover:border-marker"
+                className="block rounded-lg border border-line bg-surface p-4 hover:border-brand"
               >
                 <p className="font-medium">{item.title}</p>
-                <p className="mt-1 text-sm text-slate">{item.subjectName}</p>
+                <p className="mt-1 text-sm text-muted">{item.subjectName}</p>
 
                 {tab === "pending" && (
                   <p className="mt-2 text-sm">
                     {item.isOverdue ? (
                       /* Plain red text, not a badge. A badge reads as decoration
                          at a glance; this needs to read as a fact. */
-                      <span className="font-medium text-red-700">
+                      <span className="font-medium text-danger">
                         Overdue. Was due {dateText(item.dueDate)}
                       </span>
                     ) : (
-                      <span className="text-slate">Due {dateText(item.dueDate)}</span>
+                      <span className="text-muted">Due {dateText(item.dueDate)}</span>
                     )}
-                    <span className="text-slate"> &middot; {item.maxMarks} marks</span>
+                    <span className="text-muted"> &middot; {item.maxMarks} marks</span>
                   </p>
                 )}
 
                 {tab === "submitted" && (
-                  <p className="mt-2 text-sm text-slate">
+                  <p className="mt-2 text-sm text-muted">
                     Sent {dateText(item.submittedAt ?? item.dueDate)} &middot;{" "}
                     {statusText(item.status ?? "submitted")}
                   </p>
@@ -203,7 +203,7 @@ export default function AssignmentsView({
                       {item.finalScore} / {item.maxMarks}
                     </span>
                     {item.percentage !== null && (
-                      <span className="text-slate"> &middot; {item.percentage}%</span>
+                      <span className="text-muted"> &middot; {item.percentage}%</span>
                     )}
                   </p>
                 )}

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ButtonLink } from "@/components/ui/Button";
 import { getTutorSession } from "@/lib/auth/tutor";
 import { listAssignmentsForTutor } from "@/lib/db/assignments";
 import { getSchoolSkips } from "@/lib/db/skips";
@@ -32,31 +33,26 @@ export default async function TutorAssignmentsPage() {
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
       <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold">Your assignments</h1>
-        <Link
-          href="/tutor/assignments/new"
-          className="rounded-lg bg-marker px-4 py-2 font-medium text-chalk hover:bg-markerDark"
-        >
-          New assignment
-        </Link>
+        <h1 className="text-title">Your assignments</h1>
+        <ButtonLink href="/tutor/assignments/new">New assignment</ButtonLink>
       </div>
 
-      <Link href="/tutor" className="mt-3 block text-sm text-slate">
+      <Link href="/tutor" className="mt-3 block text-sm text-muted">
         Back to your lessons
       </Link>
 
       <SkipNotices reasons={skips} />
 
       {assignments.length === 0 ? (
-        <div className="mt-8 rounded-lg border border-line bg-chalk p-6">
+        <div className="mt-8 rounded-lg border border-line bg-surface p-6">
           <p className="font-medium">No assignments yet</p>
-          <p className="mt-1 text-slate">
+          <p className="mt-1 text-muted">
             Set work for a class and the AI will mark it against your marking guide.
             You review every mark before students see it.
           </p>
           <Link
             href="/tutor/assignments/new"
-            className="mt-4 inline-block font-medium text-marker"
+            className="mt-4 inline-block font-medium text-brand"
           >
             Set your first assignment
           </Link>
@@ -64,21 +60,21 @@ export default async function TutorAssignmentsPage() {
       ) : (
         <ul className="mt-8 space-y-3">
           {assignments.map((a) => (
-            <li key={a.id} className="rounded-lg border border-line bg-chalk p-4">
+            <li key={a.id} className="rounded-lg border border-line bg-surface p-4">
               <Link href={`/tutor/assignments/${a.id}/submissions`} className="block">
                 <p className="font-medium">{a.title}</p>
-                <p className="mt-1 text-sm text-slate">
+                <p className="mt-1 text-sm text-muted">
                   {a.className}. {a.subjectName}. {ASSIGNMENT_TYPE_LABELS[a.type]}.{" "}
                   {a.maxMarks} marks.
                 </p>
                 <p className="mt-1 text-sm">
                   {a.isActive ? (
-                    <span className="text-slate">
+                    <span className="text-muted">
                       Due {new Date(a.dueDate).toDateString()}
                       {a.dueDate < now ? ". Closed" : ""}
                     </span>
                   ) : (
-                    <span className="text-slate">Not released to the class</span>
+                    <span className="text-muted">Not released to the class</span>
                   )}
                 </p>
               </Link>

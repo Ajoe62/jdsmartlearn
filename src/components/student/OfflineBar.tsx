@@ -74,16 +74,17 @@ function Bar({
   tone: "quiet" | "busy" | "warn";
   children: React.ReactNode;
 }) {
+  // Palette tokens, not Tailwind's built-in ambers - see docs/ilumo-brand.md.
   const toneClass =
     tone === "warn"
-      ? "bg-amber-50 text-amber-900"
+      ? "bg-warnSoft text-warn"
       : tone === "busy"
-        ? "bg-markerSoft text-marker"
-        : "bg-paper text-slate";
+        ? "bg-accentSoft text-accentText"
+        : "bg-canvas text-muted";
 
   return (
     <div role="status" aria-live="polite" className={`border-b border-line ${toneClass}`}>
-      <div className="mx-auto flex max-w-readable items-center justify-between gap-3 px-5 py-2 text-sm">
+      <div className="mx-auto flex max-w-app items-center justify-between gap-3 px-5 py-2 text-sm">
         {children}
       </div>
     </div>

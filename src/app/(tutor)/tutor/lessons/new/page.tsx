@@ -25,13 +25,13 @@ export default async function NewLessonPage() {
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/tutor" className="text-sm text-slate">
+      <Link href="/tutor" className="text-sm text-muted">
         ← Your lessons
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">New lesson</h1>
+      <h1 className="mt-3 text-title">New lesson</h1>
 
       {classes.length === 0 ? (
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+        <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
           No classes are assigned to you yet. Ask your school admin to assign your
           classes in ResultPeak.
         </p>

@@ -1,6 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import { CONTROL } from "@/components/ui/Field";
 import { SUBMITTABLE_TYPES } from "@/lib/storage/file-types";
 import { RESULTPEAK_TERMS } from "@/lib/academic-calendar";
 import { ASSIGNMENT_TYPES, ASSIGNMENT_TYPE_LABELS } from "@/types/student-dashboard";
@@ -11,7 +13,6 @@ type SubjectOpt = { id: string; name: string };
 type LessonOpt = { id: string; title: string; classId: string; subjectId: string };
 
 const MIN_GUIDE = 20;
-const FIELD = "mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2";
 
 /**
  * Deliberately online-only, unlike the new lesson form.
@@ -130,7 +131,7 @@ export default function NewAssignmentForm({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Photosynthesis: short answers"
-          className={FIELD}
+          className={CONTROL}
         />
       </label>
 
@@ -142,7 +143,7 @@ export default function NewAssignmentForm({
             setClassId(e.target.value);
             setLinkedLessonId("");
           }}
-          className={FIELD}
+          className={CONTROL}
         >
           <option value="">Choose a class</option>
           {classes.map((c) => (
@@ -161,7 +162,7 @@ export default function NewAssignmentForm({
             setSubjectId(e.target.value);
             setLinkedLessonId("");
           }}
-          className={FIELD}
+          className={CONTROL}
         >
           <option value="">Choose a subject</option>
           {subjects.map((s) => (
@@ -179,7 +180,7 @@ export default function NewAssignmentForm({
           onChange={(e) => setDescription(e.target.value)}
           rows={4}
           placeholder="What should they do, and how should they answer?"
-          className={FIELD}
+          className={CONTROL}
         />
       </label>
 
@@ -189,7 +190,7 @@ export default function NewAssignmentForm({
           <select
             value={type}
             onChange={(e) => setType(e.target.value as AssignmentType)}
-            className={FIELD}
+            className={CONTROL}
           >
             {ASSIGNMENT_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -201,7 +202,7 @@ export default function NewAssignmentForm({
 
         <label className="block">
           <span className="text-sm font-medium">Term</span>
-          <select value={term} onChange={(e) => setTerm(e.target.value)} className={FIELD}>
+          <select value={term} onChange={(e) => setTerm(e.target.value)} className={CONTROL}>
             {RESULTPEAK_TERMS.map((t) => (
               <option key={t} value={t}>
                 {t}
@@ -216,7 +217,7 @@ export default function NewAssignmentForm({
         <select
           value={session}
           onChange={(e) => setSession(e.target.value)}
-          className={FIELD}
+          className={CONTROL}
         >
           {knownSessions.map((s) => (
             <option key={s} value={s}>
@@ -224,7 +225,7 @@ export default function NewAssignmentForm({
             </option>
           ))}
         </select>
-        <span className="mt-1 block text-sm text-slate">
+        <span className="mt-1 block text-sm text-muted">
           Set by your school admin. Marks count towards this term and session even
           if the school moves on later.
         </span>
@@ -237,7 +238,7 @@ export default function NewAssignmentForm({
             type="datetime-local"
             value={due}
             onChange={(e) => setDue(e.target.value)}
-            className={FIELD}
+            className={CONTROL}
           />
         </label>
 
@@ -250,14 +251,14 @@ export default function NewAssignmentForm({
             max={100}
             value={maxMarks}
             onChange={(e) => setMaxMarks(e.target.value)}
-            className={FIELD}
+            className={CONTROL}
           />
         </label>
       </div>
 
       <label className="block">
         <span className="text-sm font-medium">What should a correct answer include?</span>
-        <span className="mt-1 block text-sm text-slate">
+        <span className="mt-1 block text-sm text-muted">
           The AI uses this to grade student work. Students never see it.
         </span>
         <textarea
@@ -265,10 +266,10 @@ export default function NewAssignmentForm({
           onChange={(e) => setMarkingGuide(e.target.value)}
           rows={6}
           placeholder="Name the two stages. Say where each happens in the leaf. Give one word equation."
-          className={FIELD}
+          className={CONTROL}
         />
         {guideShort && markingGuide.length > 0 && (
-          <span className="mt-1 block text-sm text-slate">
+          <span className="mt-1 block text-sm text-muted">
             A little more detail marks far better than a single line.
           </span>
         )}
@@ -280,7 +281,7 @@ export default function NewAssignmentForm({
           value={linkedLessonId}
           onChange={(e) => setLinkedLessonId(e.target.value)}
           disabled={!classId || !subjectId}
-          className={`${FIELD} disabled:opacity-50`}
+          className={`${CONTROL} disabled:opacity-50`}
         >
           <option value="">
             {!classId || !subjectId
@@ -297,7 +298,7 @@ export default function NewAssignmentForm({
         </select>
       </label>
 
-      <fieldset className="rounded-lg border border-line bg-chalk p-4">
+      <fieldset className="rounded-lg border border-line bg-surface p-4">
         <legend className="px-1 text-sm font-medium">Students may attach</legend>
         {filesAvailable ? (
           <>
@@ -313,13 +314,13 @@ export default function NewAssignmentForm({
                 </label>
               ))}
             </div>
-            <p className="mt-2 text-sm text-slate">
+            <p className="mt-2 text-sm text-muted">
               Leave all unticked for typed answers only. A student attaching a file
               needs a connection, so typed answers reach you from more phones.
             </p>
           </>
         ) : (
-          <p className="mt-1 text-sm text-slate">
+          <p className="mt-1 text-sm text-muted">
             File storage is not set up, so students will type their answers.
           </p>
         )}
@@ -333,26 +334,21 @@ export default function NewAssignmentForm({
         />
         <span className="text-sm font-medium">
           Show this to the class now
-          <span className="block font-normal text-slate">
+          <span className="block font-normal text-muted">
             Turn it off to save it and release it later.
           </span>
         </span>
       </label>
 
       {error && (
-        <p role="alert" className="rounded-lg border border-line bg-paper p-3 text-sm">
+        <p role="alert" className="rounded-lg border border-line bg-canvas p-3 text-sm">
           {error}
         </p>
       )}
 
-      <button
-        type="button"
-        onClick={save}
-        disabled={!ready}
-        className="w-full rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
-      >
+      <Button onClick={save} disabled={!ready} size="lg" full>
         {busy ? "Saving" : "Save assignment"}
-      </button>
+      </Button>
     </div>
   );
 }

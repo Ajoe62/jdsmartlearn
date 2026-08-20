@@ -21,10 +21,10 @@ export default async function SchoolSettingsPage() {
   if (!session.isAdmin) {
     return (
       <main className="mx-auto max-w-readable px-5 py-10">
-        <Link href="/tutor" className="text-sm text-slate">
+        <Link href="/tutor" className="text-sm text-muted">
           Back to your lessons
         </Link>
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+        <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
           Only a school admin can change assessment settings. Ask your admin to set
           the current term and session.
         </p>
@@ -45,11 +45,11 @@ export default async function SchoolSettingsPage() {
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/tutor" className="text-sm text-slate">
+      <Link href="/tutor" className="text-sm text-muted">
         Back to your lessons
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">Assessment settings</h1>
-      <p className="mt-2 text-slate">
+      <h1 className="mt-3 text-title">Assessment settings</h1>
+      <p className="mt-2 text-muted">
         These decide which term and session a piece of work counts towards, and
         which column its score lands in on the result sheet.
       </p>

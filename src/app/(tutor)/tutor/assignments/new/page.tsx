@@ -47,10 +47,10 @@ export default async function NewAssignmentPage() {
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/tutor" className="text-sm text-slate">
+      <Link href="/tutor" className="text-sm text-muted">
         Back to your lessons
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">New assignment</h1>
+      <h1 className="mt-3 text-title">New assignment</h1>
 
       {/*
         No setting means no term and no session to freeze onto the assignment.
@@ -58,23 +58,23 @@ export default async function NewAssignmentPage() {
         files a whole class's marks where no result sheet will read them.
       */}
       {!settings ? (
-        <div className="mt-6 rounded-lg border border-line bg-chalk p-4">
+        <div className="mt-6 rounded-lg border border-line bg-surface p-4">
           <p className="font-medium">Your school has not set the current term yet</p>
-          <p className="mt-1 text-slate">
+          <p className="mt-1 text-muted">
             A school admin needs to choose the current term and session before work
             can be set. Until then, marks would not reach any report card.
           </p>
           {session.isAdmin && (
             <Link
               href="/tutor/settings"
-              className="mt-4 inline-block font-medium text-marker"
+              className="mt-4 inline-block font-medium text-brand"
             >
               Open assessment settings
             </Link>
           )}
         </div>
       ) : classes.length === 0 ? (
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+        <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
           No classes are assigned to you yet. Ask your school admin to assign your
           classes in ResultPeak.
         </p>

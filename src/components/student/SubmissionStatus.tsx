@@ -28,32 +28,32 @@ export default function SubmissionStatus({
 }) {
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/student/assignments?tab=submitted" className="text-sm text-slate">
+      <Link href="/student/assignments?tab=submitted" className="text-sm text-muted">
         Back to your work
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">{assignment.title}</h1>
-      <p className="mt-1 text-sm text-slate">
+      <h1 className="mt-3 text-title">{assignment.title}</h1>
+      <p className="mt-1 text-sm text-muted">
         {assignment.subjectName} &middot; {assignment.maxMarks} marks
       </p>
 
-      <div className="mt-6 rounded-lg border border-line bg-chalk p-4">
+      <div className="mt-6 rounded-lg border border-line bg-surface p-4">
         <p className="font-medium">Sent to your teacher</p>
-        <p className="mt-1 text-slate">
+        <p className="mt-1 text-muted">
           You sent this on {new Date(submission.submittedAt).toDateString()}. Your
           teacher marks it before you see a score. Check back later.
         </p>
       </div>
 
       <section className="mt-6">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           What you sent
         </h2>
         {submission.content ? (
-          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-chalk p-4">
+          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-surface p-4">
             {submission.content}
           </p>
         ) : (
-          <p className="mt-2 text-slate">You sent files only.</p>
+          <p className="mt-2 text-muted">You sent files only.</p>
         )}
 
         {submission.attachments.length > 0 && (
@@ -62,10 +62,10 @@ export default function SubmissionStatus({
               <li key={file.href}>
                 <a
                   href={file.href}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-line bg-chalk px-3 py-2 text-sm hover:border-marker"
+                  className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3 py-2 text-sm hover:border-brand"
                 >
                   <span className="min-w-0 truncate">{file.name}</span>
-                  <span className="shrink-0 text-slate">{formatBytes(file.size)}</span>
+                  <span className="shrink-0 text-muted">{formatBytes(file.size)}</span>
                 </a>
               </li>
             ))}

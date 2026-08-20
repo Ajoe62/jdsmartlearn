@@ -1,6 +1,19 @@
-<svg width="32" height="32" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="JDSmartLearn AI">
-  <!-- Favicon: simplified (no text lines) so it stays crisp at 16px. -->
-  <rect x="2" y="2" width="60" height="60" rx="16" fill="#0E5A3C"/>
-  <rect x="20" y="17" width="22" height="30" rx="4" fill="#FFFFFF"/>
-  <path d="M45 11 L47 16.6 L52.6 18 L47 19.4 L45 25 L43 19.4 L37.4 18 L43 16.6 Z" fill="#C88A1C"/>
+<svg width="32" height="32" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="JDSmartLearn">
+  <!--
+    The tab icon. This file, not public/favicon.svg, is what Next serves - the
+    App Router icon convention generates the <link rel="icon"> from it.
+
+    Same geometry as public/logo-mark.svg with the clear space removed, so the
+    shape fills the tile and the diagonal split still reads at 16px.
+  -->
+  <defs>
+    <clipPath id="ilumo-icon-lr">
+      <path d="M64 0 L64 64 L0 64 Z"/>
+    </clipPath>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="17" fill="#5FE9B2"/>
+  <g clip-path="url(#ilumo-icon-lr)">
+    <rect x="2" y="2" width="60" height="60" rx="17" fill="#3E9BFF"/>
+  </g>
+  <rect x="5" y="21.5" width="54" height="21" rx="10.5" fill="#3852D6" transform="rotate(45 32 32)"/>
 </svg>

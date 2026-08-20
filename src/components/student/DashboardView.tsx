@@ -1,7 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import Badge from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { CardLink } from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
+import PageHeader, { NavPill, NavPills } from "@/components/ui/PageHeader";
 import { STORE, getAll, getMeta } from "@/lib/offline/db";
 import type { StoredLesson, StoredMaterial } from "@/lib/offline/db";
 import { groupBySubject, type DashboardLesson } from "@/lib/offline/merge";
@@ -83,74 +87,86 @@ export default function DashboardView({
   }
 
   return (
-    <main className="mx-auto max-w-readable px-5 py-10">
-      <h1 className="text-2xl font-semibold">Your subjects</h1>
+    <main className="mx-auto max-w-app px-5 py-8">
+      <PageHeader title="Your subjects" />
 
-      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
-        <Link href="/student/assignments" className="text-sm text-marker underline">
-          Your work
-        </Link>
-        <Link href="/student/progress" className="text-sm text-marker underline">
-          Your progress
-        </Link>
-      </div>
+      <NavPills>
+        <NavPill href="/student" active>
+          Lessons
+        </NavPill>
+        <NavPill href="/student/assignments">Your work</NavPill>
+        <NavPill href="/student/progress">Your progress</NavPill>
+      </NavPills>
 
       {savedAt && (
-        <p className="mt-2 text-xs text-slate">
+        <p className="mt-4 flex items-center gap-1.5 text-xs text-muted">
+          <svg className="h-3.5 w-3.5 text-successText" viewBox="0 0 20 20" fill="none" aria-hidden>
+            <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5" />
+            <path
+              d="m6.5 10.25 2.25 2.25 4.75-5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
           Saved on your phone &middot; updated {relativeTime(savedAt)}
         </p>
       )}
 
       {downloadable > 0 && (
-        <button
-          type="button"
+        <Button
           onClick={() => void saveAll()}
           disabled={!!saving}
-          className="mt-4 w-full rounded-lg border border-line bg-chalk px-4 py-3 text-sm font-medium text-marker disabled:opacity-60 sm:w-auto"
+          className="mt-4 w-full sm:w-auto"
         >
           {saving
             ? `Saving lesson material… ${saving.done} of ${saving.total}`
             : `Save ${downloadable} lesson${downloadable === 1 ? "" : "s"} for offline`}
-        </button>
+        </Button>
       )}
 
       {groups.length === 0 ? (
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
-          No lessons yet. Your teacher will publish lessons here soon.
-        </p>
+        <div className="mt-6">
+          <EmptyState title="No lessons yet">
+            Your teacher will publish lessons here soon. Check back after your next class.
+          </EmptyState>
+        </div>
       ) : (
-        <div className="mt-6 space-y-8">
+        <div className="mt-8 space-y-8">
           {groups.map((group) => (
             <section key={group.subjectId}>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate">
+              <h2 className="text-eyebrow font-semibold uppercase text-muted">
                 {group.subjectName}
               </h2>
-              <ul className="mt-2 space-y-2">
+              <ul className="mt-2.5 space-y-2.5">
                 {group.lessons.map((lesson) => (
                   <li key={lesson.lessonId}>
-                    <Link
-                      href={`/student/lessons/${lesson.lessonId}`}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-line bg-chalk p-4 hover:border-marker"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{lesson.title}</p>
-                        <div className="mt-1 flex flex-wrap gap-2 text-xs">
-                          {lesson.hasMaterial && (
-                            <span className="rounded-full bg-paper px-2 py-0.5 text-slate">
-                              Material
-                            </span>
-                          )}
-                          {lesson.hasStudyGuide && (
-                            <span className="rounded-full bg-markerSoft px-2 py-0.5 text-marker">
-                              Study guide
-                            </span>
-                          )}
+                    <CardLink href={`/student/lessons/${lesson.lessonId}`} className="group">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-display font-semibold">{lesson.title}</p>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {lesson.hasStudyGuide && <Badge tone="info">Study guide</Badge>}
+                            {lesson.hasMaterial && <Badge tone="neutral">Material</Badge>}
+                          </div>
                         </div>
+                        <svg
+                          className="h-4 w-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          aria-hidden
+                        >
+                          <path
+                            d="m6 3.5 4.5 4.5L6 12.5"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
                       </div>
-                      <span aria-hidden className="text-slate">
-                        &rsaquo;
-                      </span>
-                    </Link>
+                    </CardLink>
                   </li>
                 ))}
               </ul>

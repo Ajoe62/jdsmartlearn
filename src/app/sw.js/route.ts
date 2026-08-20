@@ -28,7 +28,7 @@ const OURS = [SHELL, STATIC, FILES];
 /** The offline renderer. Data-free, so it is safe on a shared phone. */
 const SHELL_URL = "/student/offline";
 
-const PRECACHE = [SHELL_URL, "/student/sign-in", "/manifest.webmanifest", "/logo-horizontal.svg"];
+const PRECACHE = [SHELL_URL, "/student/sign-in", "/manifest.webmanifest", "/logo-mark.svg"];
 
 /**
  * NEVER cache these. Tutor pages and the tutor lesson API carry marking guides,
@@ -233,8 +233,17 @@ function offlineHtml() {
     "<!doctype html><html lang=en><meta charset=utf-8>",
     "<meta name=viewport content='width=device-width,initial-scale=1'>",
     "<title>You're offline</title>",
-    "<style>body{font:16px system-ui;margin:0;padding:2rem;color:#1f2933}",
-    "h1{font-size:1.25rem;margin:0 0 .5rem}p{margin:0;color:#52606d}</style>",
+    // The one screen with no access to the design system, so the tokens are
+    // inlined. Keep these in step with docs/ilumo-brand.md: canvas, ink, muted.
+    "<style>body{font:16px system-ui;margin:0;padding:2rem;background:#F7F8FA;color:#1A1C1F}",
+    "h1{font-size:1.25rem;margin:1rem 0 .5rem}p{margin:0;color:#5B6470}",
+    "svg{display:block}</style>",
+    "<svg width=40 height=40 viewBox='0 0 64 64' aria-hidden>",
+    "<clipPath id=c><path d='M64 0 L64 64 L0 64 Z'/></clipPath>",
+    "<rect x=6 y=6 width=52 height=52 rx=15 fill='#5FE9B2'/>",
+    "<g clip-path='url(#c)'><rect x=6 y=6 width=52 height=52 rx=15 fill='#3E9BFF'/></g>",
+    "<rect x=9 y=23 width=46 height=18 rx=9 fill='#3852D6' transform='rotate(45 32 32)'/>",
+    "</svg>",
     "<h1>You're offline</h1>",
     "<p>Connect to the internet once, then your lessons will be saved on your phone.</p>",
     "</html>",

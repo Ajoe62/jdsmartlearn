@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import { CONTROL } from "@/components/ui/Field";
 import { STORE, del, get, put } from "@/lib/offline/db";
 import type { StoredDraft } from "@/lib/offline/db";
 import { queueSubmission } from "@/lib/offline/submissions";
@@ -169,17 +171,17 @@ export default function SubmissionForm({
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/student/assignments" className="text-sm text-slate">
+      <Link href="/student/assignments" className="text-sm text-muted">
         Back to your work
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">{assignment.title}</h1>
-      <p className="mt-1 text-sm text-slate">
+      <h1 className="mt-3 text-title">{assignment.title}</h1>
+      <p className="mt-1 text-sm text-muted">
         {assignment.subjectName} &middot; {assignment.maxMarks} marks &middot; Due{" "}
         {new Date(assignment.dueDate).toDateString()}
       </p>
 
       {assignment.description && (
-        <p className="mt-4 whitespace-pre-wrap rounded-lg border border-line bg-chalk p-4">
+        <p className="mt-4 whitespace-pre-wrap rounded-lg border border-line bg-surface p-4">
           {assignment.description}
         </p>
       )}
@@ -187,20 +189,20 @@ export default function SubmissionForm({
       {assignment.linkedLessonId && (
         <Link
           href={`/student/lessons/${assignment.linkedLessonId}`}
-          className="mt-3 inline-block text-sm text-marker underline"
+          className="mt-3 inline-block text-sm text-brand underline"
         >
           Read the lesson first
         </Link>
       )}
 
       {!open ? (
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+        <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
           The time for this assignment has passed. Speak to your teacher.
         </p>
       ) : (
         <>
           {!online && (
-            <p role="status" className="mt-6 rounded-lg border border-line bg-paper p-4 text-sm">
+            <p role="status" className="mt-6 rounded-lg border border-line bg-canvas p-4 text-sm">
               <span className="font-medium">You&rsquo;re offline.</span> Keep writing.
               Your answer is saved on your phone and sends when you have internet.
             </p>
@@ -213,9 +215,9 @@ export default function SubmissionForm({
               onChange={(e) => onType(e.target.value)}
               rows={12}
               disabled={busy}
-              className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2 disabled:opacity-60"
+              className={CONTROL}
             />
-            <span className="mt-1 block text-right text-xs text-slate">
+            <span className="mt-1 block text-right text-xs text-muted">
               {content.length} characters
             </span>
           </label>
@@ -223,7 +225,7 @@ export default function SubmissionForm({
           {filesAvailable && (
             <div className="mt-4">
               <p className="text-sm font-medium">Add a photo or file</p>
-              <p className="mt-1 text-sm text-slate">
+              <p className="mt-1 text-sm text-muted">
                 {online
                   ? `You can attach ${assignment.allowedFileTypes.join(", ")}.`
                   : "You need internet to attach a file."}
@@ -245,17 +247,17 @@ export default function SubmissionForm({
                   {files.map((file, i) => (
                     <li
                       key={`${file.name}-${i}`}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-line bg-chalk px-3 py-2 text-sm"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
                     >
                       <span className="min-w-0 truncate">
                         {file.name}
-                        <span className="text-slate"> {formatBytes(file.size)}</span>
+                        <span className="text-muted"> {formatBytes(file.size)}</span>
                       </span>
                       <button
                         type="button"
                         disabled={busy}
                         onClick={() => setFiles((c) => c.filter((_, j) => j !== i))}
-                        className="shrink-0 font-medium text-marker disabled:opacity-60"
+                        className="shrink-0 font-medium text-brand disabled:opacity-60"
                       >
                         Remove
                       </button>
@@ -267,46 +269,37 @@ export default function SubmissionForm({
           )}
 
           {progress !== null && (
-            <p role="status" className="mt-4 text-sm text-slate">
+            <p role="status" className="mt-4 text-sm text-muted">
               Sending your work. {progress}%
             </p>
           )}
 
           {error && (
-            <p role="alert" className="mt-4 rounded-lg border border-line bg-paper p-3 text-sm">
+            <p role="alert" className="mt-4 rounded-lg border border-line bg-canvas p-3 text-sm">
               {error}
             </p>
           )}
 
           {confirming ? (
-            <div className="mt-6 rounded-lg border border-line bg-paper p-4">
+            <div className="mt-6 rounded-lg border border-line bg-canvas p-4">
               <p className="font-medium">Once submitted you cannot edit this. Continue?</p>
               <div className="mt-3 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => void send()}
-                  className="rounded-lg bg-marker px-4 py-2 font-medium text-chalk hover:bg-markerDark"
-                >
-                  Confirm
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirming(false)}
-                  className="rounded-lg border border-line bg-chalk px-4 py-2 font-medium"
-                >
+                <Button onClick={() => void send()}>Confirm</Button>
+                <Button variant="secondary" onClick={() => setConfirming(false)}>
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
-            <button
-              type="button"
+            <Button
               onClick={() => setConfirming(true)}
               disabled={!hasWork || busy}
-              className="mt-6 w-full rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
+              size="lg"
+              full
+              className="mt-6"
             >
               {busy ? "Sending" : "Send to your teacher"}
-            </button>
+            </Button>
           )}
         </>
       )}

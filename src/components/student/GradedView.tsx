@@ -29,25 +29,25 @@ export default function GradedView({
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/student/assignments?tab=graded" className="text-sm text-slate">
+      <Link href="/student/assignments?tab=graded" className="text-sm text-muted">
         Back to your work
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">{assignment.title}</h1>
-      <p className="mt-1 text-sm text-slate">{assignment.subjectName}</p>
+      <h1 className="mt-3 text-title">{assignment.title}</h1>
+      <p className="mt-1 text-sm text-muted">{assignment.subjectName}</p>
 
-      <div className="mt-6 rounded-lg border border-line bg-chalk p-6 text-center">
+      <div className="mt-6 rounded-lg border border-line bg-surface p-6 text-center">
         <p className="text-4xl font-semibold">
           {score} / {submission.maxMarks}
         </p>
-        {percentage !== null && <p className="mt-1 text-slate">{percentage}%</p>}
+        {percentage !== null && <p className="mt-1 text-muted">{percentage}%</p>}
       </div>
 
       {submission.teacherComment && (
         <section className="mt-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
             From your teacher
           </h2>
-          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-chalk p-4">
+          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-surface p-4">
             {submission.teacherComment}
           </p>
         </section>
@@ -55,10 +55,10 @@ export default function GradedView({
 
       {submission.feedback && (
         <section className="mt-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
             Feedback
           </h2>
-          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-chalk p-4">
+          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-surface p-4">
             {submission.feedback}
           </p>
         </section>
@@ -74,12 +74,12 @@ export default function GradedView({
 
       {submission.topicsMastered && submission.topicsMastered.length > 0 && (
         <section className="mt-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
             You know this well
           </h2>
           <ul className="mt-2 space-y-1">
             {submission.topicsMastered.map((topic) => (
-              <li key={topic} className="text-green-800">
+              <li key={topic} className="text-successText">
                 {topic}
               </li>
             ))}
@@ -89,7 +89,7 @@ export default function GradedView({
 
       {submission.topicsToRevise && submission.topicsToRevise.length > 0 && (
         <section className="mt-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
             Go over these again
           </h2>
           <ul className="mt-2 space-y-1">
@@ -100,12 +100,12 @@ export default function GradedView({
                 {link.lessonId ? (
                   <Link
                     href={`/student/lessons/${link.lessonId}`}
-                    className="text-amber-700 underline"
+                    className="text-warn underline"
                   >
                     {link.topic}
                   </Link>
                 ) : (
-                  <span className="text-amber-700">{link.topic}</span>
+                  <span className="text-warn">{link.topic}</span>
                 )}
               </li>
             ))}
@@ -114,15 +114,15 @@ export default function GradedView({
       )}
 
       <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           What you sent
         </h2>
         {submission.content ? (
-          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-chalk p-4 text-slate">
+          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-line bg-surface p-4 text-muted">
             {submission.content}
           </p>
         ) : (
-          <p className="mt-2 text-slate">You sent files only.</p>
+          <p className="mt-2 text-muted">You sent files only.</p>
         )}
       </section>
     </main>
@@ -132,7 +132,7 @@ export default function GradedView({
 function List({ title, items }: { title: string; items: string[] }) {
   return (
     <section className="mt-6">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-slate">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
         {title}
       </h2>
       <ul className="mt-2 space-y-1">

@@ -30,7 +30,7 @@ export default function OfflineShell() {
   if (!route) {
     return (
       <main className="mx-auto max-w-readable px-5 py-10">
-        <p className="text-slate">Opening your lessons…</p>
+        <p className="text-muted">Opening your lessons…</p>
       </main>
     );
   }

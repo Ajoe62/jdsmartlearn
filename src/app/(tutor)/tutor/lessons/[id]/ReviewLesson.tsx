@@ -1,6 +1,11 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Badge from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import Callout from "@/components/ui/Callout";
+import { Card, CardHeader } from "@/components/ui/Card";
+import { CONTROL } from "@/components/ui/Field";
 import type { LessonStatus } from "@/types";
 
 type Question = { number: number; question: string };
@@ -43,27 +48,71 @@ function GeneratePanel({ lessonId, status }: { lessonId: string; status: LessonS
   }
 
   return (
-    <div className="mt-8">
+    <div className="mt-6 space-y-4">
       {status === "generating" && !busy && (
-        <p className="mb-4 rounded-lg bg-markerSoft px-3 py-2 text-sm text-marker">
-          A previous run didn&apos;t finish. Try creating the study materials again.
-        </p>
+        <Callout tone="warn" title="A previous run didn't finish">
+          Try creating the study materials again.
+        </Callout>
       )}
-      <p className="text-slate">
-        We&apos;ll write a student summary, practice questions, and a marking guide from
-        this lesson. You&apos;ll review and edit everything before students see it.
+
+      <Card className="overflow-hidden">
+        {/* The azure left rule is the accent's job: this panel is the AI moment
+            on the tutor's path (docs/ilumo-brand.md section 3). */}
+        <div className="border-l-4 border-l-accent bg-accentSoft px-4 py-3">
+          <p className="font-display text-subheading font-semibold">
+            Create the study materials
+          </p>
+          <p className="mt-1 text-sm text-muted">
+            From this lesson, you&rsquo;ll get three things back in about a minute.
+          </p>
+        </div>
+        <ul className="divide-y divide-line">
+          <WhatYouGet
+            title="A student summary"
+            detail="Written for the reading level of this class."
+          />
+          <WhatYouGet
+            title="Practice questions"
+            detail="For your students to answer after reading."
+          />
+          <WhatYouGet
+            title="A marking guide"
+            detail="For you only. Students never see it."
+          />
+        </ul>
+      </Card>
+
+      <p className="text-sm text-muted">
+        Nothing reaches your students until you review it and publish.
       </p>
-      {error && (
-        <p className="mt-4 rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
-      )}
-      <button
-        onClick={generate}
-        disabled={busy}
-        className="mt-6 w-full rounded-lg bg-brass px-4 py-3 font-medium text-ink hover:brightness-95 disabled:opacity-50"
-      >
+
+      {error && <Callout tone="danger" title="We couldn't create study materials">{error}</Callout>}
+
+      <Button onClick={generate} disabled={busy} size="lg" full>
         {busy ? "Creating study materials… this can take a moment" : "Generate study materials"}
-      </button>
+      </Button>
     </div>
+  );
+}
+
+function WhatYouGet({ title, detail }: { title: string; detail: string }) {
+  return (
+    <li className="flex gap-3 px-4 py-3">
+      <svg className="mt-0.5 h-5 w-5 shrink-0 text-successText" viewBox="0 0 20 20" fill="none" aria-hidden>
+        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="m6.5 10.25 2.25 2.25 4.75-5"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span>
+        <span className="block text-sm font-medium">{title}</span>
+        <span className="block text-sm text-muted">{detail}</span>
+      </span>
+    </li>
   );
 }
 
@@ -168,99 +217,103 @@ function ReviewPanel({
   }
 
   return (
-    <div className="mt-6 space-y-6">
+    <div className="mt-6 space-y-5">
       {published ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg bg-markerSoft px-4 py-3">
-          <p className="text-sm font-medium text-marker">
-            Published — students in this class can read it. Edits below take effect when
-            you publish again.
-          </p>
-          <button
-            onClick={unpublish}
-            disabled={busy !== false}
-            className="shrink-0 rounded-lg border border-line bg-chalk px-3 py-1.5 text-sm font-medium text-slate disabled:opacity-50"
-          >
-            {busy === "unpublish" ? "Hiding…" : "Unpublish"}
-          </button>
-        </div>
+        <Callout tone="success" title="Published">
+          <span className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              Students in this class can read it. Edits below take effect when you publish
+              again.
+            </span>
+            <Button variant="secondary" onClick={unpublish} disabled={busy !== false}>
+              {busy === "unpublish" ? "Hiding…" : "Unpublish"}
+            </Button>
+          </span>
+        </Callout>
       ) : (
-        <p className="rounded-lg bg-brassSoft px-4 py-3 text-sm text-brassText">
-          AI-generated — review before publishing.
-        </p>
+        /* Mandatory before publish - CLAUDE.md, AI rules. */
+        <Callout tone="info" title="AI-generated — review before publishing">
+          Read every section and fix anything that is wrong for your class. Nothing reaches
+          your students until you publish.
+        </Callout>
       )}
 
-      <section>
-        <label className="block">
-          <span className="text-sm font-medium">Student summary</span>
+      <Card>
+        <CardHeader
+          title="Student summary"
+          hint="This is what your students read first."
+        />
+        <div className="p-4">
           <textarea
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
             rows={10}
-            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
+            aria-label="Student summary"
+            className={CONTROL}
           />
-        </label>
-      </section>
+        </div>
+      </Card>
 
-      <section>
-        <h2 className="text-sm font-medium">Practice questions</h2>
-        <ol className="mt-2 space-y-3">
+      <Card>
+        <CardHeader
+          title="Practice questions"
+          hint={`${questions.length} question${questions.length === 1 ? "" : "s"} for your students to answer.`}
+        />
+        <ol className="divide-y divide-line">
           {questions.map((q) => (
-            <li key={q.number} className="flex gap-3">
-              <span className="mt-2 w-6 shrink-0 text-sm text-slate">{q.number}.</span>
+            <li key={q.number} className="flex gap-3 p-4">
+              <span className="tabular mt-2.5 w-5 shrink-0 text-sm text-muted">
+                {q.number}.
+              </span>
               <input
                 type="text"
                 value={q.question}
                 onChange={(e) => setQuestion(q.number, e.target.value)}
-                className="w-full rounded-lg border border-line bg-chalk px-3 py-2"
+                aria-label={`Question ${q.number}`}
+                className={CONTROL}
               />
             </li>
           ))}
         </ol>
-      </section>
+      </Card>
 
-      <section>
-        <h2 className="text-sm font-medium">Marking guide</h2>
-        <p className="mt-0.5 text-xs text-slate">
-          For you only — students never see this. One key point per line.
-        </p>
-        <ol className="mt-2 space-y-3">
+      <Card>
+        <CardHeader
+          title="Marking guide"
+          hint="One key point per line."
+          action={<Badge tone="warn">Only you</Badge>}
+        />
+        <ol className="divide-y divide-line">
           {guides.map((g) => (
-            <li key={g.number} className="flex gap-3">
-              <span className="mt-2 w-6 shrink-0 text-sm text-slate">{g.number}.</span>
+            <li key={g.number} className="flex gap-3 p-4">
+              <span className="tabular mt-2.5 w-5 shrink-0 text-sm text-muted">
+                {g.number}.
+              </span>
               <textarea
                 value={g.text}
                 onChange={(e) => setGuide(g.number, e.target.value)}
                 rows={3}
-                className="w-full rounded-lg border border-line bg-chalk px-3 py-2"
+                aria-label={`Marking guide for question ${g.number}`}
+                className={CONTROL}
               />
             </li>
           ))}
         </ol>
-      </section>
+      </Card>
 
-      {error && (
-        <p className="rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
-      )}
+      {error && <Callout tone="danger" title="That didn't work">{error}</Callout>}
 
-      <div className="flex flex-col gap-3 sm:flex-row-reverse">
-        <button
-          onClick={publish}
-          disabled={busy !== false}
-          className="rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50 sm:flex-1"
-        >
-          {busy === "publish"
-            ? "Publishing…"
-            : published
-              ? "Save and republish"
-              : "Publish"}
-        </button>
-        <button
-          onClick={regenerate}
-          disabled={busy !== false}
-          className="rounded-lg border border-line px-4 py-3 font-medium text-brassText disabled:opacity-50"
-        >
-          {busy === "generate" ? "Creating…" : "Regenerate"}
-        </button>
+      {/* Sticky so Publish stays reachable at the bottom of a long review on a
+          360px screen, instead of being scrolled past. */}
+      <div className="sticky bottom-0 -mx-5 border-t border-line bg-surface px-5 py-3">
+        <div className="flex flex-col gap-3 sm:flex-row-reverse">
+          <Button onClick={publish} disabled={busy !== false} size="lg" className="sm:flex-1">
+            {busy === "publish" ? "Publishing…" : published ? "Save and republish" : "Publish"}
+          </Button>
+          <Button variant="secondary" onClick={regenerate} disabled={busy !== false} size="lg">
+            {busy === "generate" ? "Creating…" : "Regenerate"}
+          </Button>
+        </div>
       </div>
     </div>
   );

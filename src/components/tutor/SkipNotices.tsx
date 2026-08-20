@@ -19,7 +19,7 @@ export default function SkipNotices({ reasons }: { reasons: SkipReason[] }) {
     <section
       role="status"
       aria-label="Things to sort out"
-      className="mt-6 rounded-lg border border-line bg-paper p-4"
+      className="mt-6 rounded-lg border border-line bg-canvas p-4"
     >
       <h2 className="text-sm font-medium">
         {reasons.length === 1

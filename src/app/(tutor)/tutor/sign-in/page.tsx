@@ -3,6 +3,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
+import { Button } from "@/components/ui/Button";
+import Callout from "@/components/ui/Callout";
+import { Card } from "@/components/ui/Card";
+import Field, { CONTROL } from "@/components/ui/Field";
 import { clientAuth } from "@/lib/firebase/client";
 
 /** Auth codes that genuinely mean "wrong email or password". */
@@ -65,45 +69,39 @@ export default function TutorSignIn() {
   }
 
   return (
-    <main className="mx-auto max-w-sm px-5 py-16">
-      <h1 className="text-2xl font-semibold">Sign in</h1>
-      <p className="mt-2 text-sm text-slate">Use the same details as ResultPeak.</p>
+    <main className="mx-auto max-w-sm px-5 py-12">
+      <h1 className="text-title">Sign in</h1>
+      <p className="mt-2 text-muted">Use the same details as ResultPeak.</p>
 
-      <div className="mt-8 space-y-4">
-        <label className="block">
-          <span className="text-sm font-medium">Email</span>
+      <Card className="mt-6 space-y-4 p-4">
+        <Field label="Email" htmlFor="email">
           <input
+            id="email"
             type="email"
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
+            className={CONTROL}
           />
-        </label>
+        </Field>
 
-        <label className="block">
-          <span className="text-sm font-medium">Password</span>
+        <Field label="Password" htmlFor="password">
           <input
+            id="password"
             type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
+            className={CONTROL}
           />
-        </label>
+        </Field>
 
-        {error && (
-          <p className="rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
-        )}
+        {error && <Callout tone="danger">{error}</Callout>}
 
-        <button
-          onClick={signIn}
-          disabled={busy || !email || !password}
-          className="w-full rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
-        >
+        <Button onClick={signIn} disabled={busy || !email || !password} size="lg" full>
           {busy ? "Signing in…" : "Sign in"}
-        </button>
-      </div>
+        </Button>
+      </Card>
     </main>
   );
 }

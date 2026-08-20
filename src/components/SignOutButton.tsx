@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
 import { wipeDevice } from "@/lib/offline/wipe";
 import { destroyTutorStore } from "@/lib/offline/tutor-db";
 
@@ -36,12 +37,8 @@ export default function SignOutButton({
   }
 
   return (
-    <button
-      onClick={signOut}
-      disabled={busy}
-      className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-slate hover:border-marker disabled:opacity-50"
-    >
+    <Button variant="secondary" onClick={signOut} disabled={busy} className="text-muted">
       {busy ? "Signing out…" : "Sign out"}
-    </button>
+    </Button>
   );
 }

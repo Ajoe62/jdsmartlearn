@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
 
 interface StudentCard {
   id: string;
@@ -58,36 +59,32 @@ export default function SignInCards({
           {students.length > 0 && (
             <button
               onClick={() => setShowCodes((v) => !v)}
-              className="rounded-lg border border-line bg-chalk px-3 py-2 text-sm hover:border-marker"
+              className="rounded-lg border border-line bg-surface px-3 py-2 text-sm hover:border-brand"
             >
               {showCodes ? "Hide codes" : "Show codes"}
             </button>
           )}
           {missing > 0 && (
-            <button
-              onClick={createUsernames}
-              disabled={busy}
-              className="rounded-lg bg-marker px-4 py-2 text-sm font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
-            >
+            <Button onClick={createUsernames} disabled={busy}>
               {busy ? "Creating…" : `Create ${missing} username${missing === 1 ? "" : "s"}`}
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
+        <p className="mt-4 rounded-lg bg-dangerSoft px-3 py-2 text-sm text-danger">{error}</p>
       )}
 
       {students.length === 0 && (
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+        <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
           Nobody in {className} has an access code yet. Ask your school admin to issue
           them in ResultPeak, then come back here.
         </p>
       )}
 
       {students.length > 0 && (
-        <ul className="mt-4 divide-y divide-line rounded-lg border border-line bg-chalk">
+        <ul className="mt-4 divide-y divide-line rounded-lg border border-line bg-surface">
           {students.map((s) => (
             <li key={s.id} className="flex items-center justify-between gap-4 p-4">
               <p className="min-w-0 truncate">{s.name}</p>
@@ -95,7 +92,7 @@ export default function SignInCards({
                 <span className="block font-mono text-sm font-medium">
                   {s.username ?? "no username yet"}
                 </span>
-                <span className="block font-mono text-sm tracking-widest text-slate">
+                <span className="block font-mono text-sm tracking-widest text-muted">
                   {showCodes ? s.code : "••••••"}
                 </span>
               </p>
@@ -107,11 +104,11 @@ export default function SignInCards({
       {blocked.length > 0 && (
         <section className="mt-8 print:hidden">
           <h3 className="text-sm font-medium">Can&rsquo;t sign in yet</h3>
-          <p className="mt-1 text-sm text-slate">
+          <p className="mt-1 text-sm text-muted">
             These students have no access code. Ask your school admin to issue one in
             ResultPeak.
           </p>
-          <ul className="mt-3 rounded-lg border border-line bg-paper p-4 text-sm text-slate">
+          <ul className="mt-3 rounded-lg border border-line bg-canvas p-4 text-sm text-muted">
             {blocked.map((name) => (
               <li key={name}>{name}</li>
             ))}

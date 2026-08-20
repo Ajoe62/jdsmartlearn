@@ -39,7 +39,7 @@ export default async function StudentHome() {
         }))}
       />
       {examsUrl && (
-        <p className="mx-auto max-w-readable px-5 pb-10 text-sm text-slate">
+        <p className="mx-auto max-w-readable px-5 pb-10 text-sm text-muted">
           <a
             className="underline"
             href={examsUrl}

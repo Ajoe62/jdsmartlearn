@@ -129,16 +129,16 @@ export default async function SubmissionsPage({
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/tutor/assignments" className="text-sm text-slate">
+      <Link href="/tutor/assignments" className="text-sm text-muted">
         Back to your assignments
       </Link>
 
-      <h1 className="mt-3 text-2xl font-semibold">{assignment.title}</h1>
-      <p className="mt-1 text-sm text-slate">
+      <h1 className="mt-3 text-title">{assignment.title}</h1>
+      <p className="mt-1 text-sm text-muted">
         {assignment.className} &middot; {assignment.subjectName} &middot; Due{" "}
         {new Date(assignment.dueDate).toDateString()}
       </p>
-      <p className="mt-1 text-sm text-slate">
+      <p className="mt-1 text-sm text-muted">
         {submissions.length} of {students.length} students have sent work
       </p>
 
@@ -157,10 +157,10 @@ export default async function SubmissionsPage({
 function NotFound() {
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/tutor/assignments" className="text-sm text-slate">
+      <Link href="/tutor/assignments" className="text-sm text-muted">
         Back to your assignments
       </Link>
-      <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+      <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
         We couldn&rsquo;t find that assignment.
       </p>
     </main>

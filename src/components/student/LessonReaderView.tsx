@@ -2,6 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Button, ButtonAnchor } from "@/components/ui/Button";
+import Callout from "@/components/ui/Callout";
+import { Card } from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
 import { STORE, get, put } from "@/lib/offline/db";
 import type { StoredLesson, StoredMaterial } from "@/lib/offline/db";
 import { saveMaterial } from "@/lib/offline/sync";
@@ -163,22 +167,19 @@ export default function LessonReaderView({
   if (state === "loading") {
     return (
       <main className="mx-auto max-w-readable px-5 py-10">
-        <p className="text-slate">Opening your lesson…</p>
+        <p className="text-muted">Opening your lesson…</p>
       </main>
     );
   }
 
   if (state === "missing" || !lesson) {
     return (
-      <main className="mx-auto max-w-readable px-5 py-10">
-        <Link href="/student" className="text-sm text-slate">
-          &larr; Your subjects
-        </Link>
-        <div className="mt-6 rounded-lg border border-line bg-chalk p-4">
-          <h1 className="font-semibold">This lesson isn&rsquo;t saved on your phone yet</h1>
-          <p className="mt-2 text-slate">
+      <main className="mx-auto max-w-readable px-5 py-8">
+        <BackToSubjects />
+        <div className="mt-6">
+          <EmptyState title="This lesson isn't saved on your phone yet">
             Connect to the internet once to save it. Then you can read it any time.
-          </p>
+          </EmptyState>
         </div>
       </main>
     );
@@ -187,51 +188,42 @@ export default function LessonReaderView({
   const hasNothing = !lesson.material && !lesson.studyGuide;
 
   return (
-    <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/student" className="text-sm text-slate">
-        &larr; Your subjects
-      </Link>
-      <h1 className="mt-3 text-2xl font-semibold">{lesson.title}</h1>
+    <main className="mx-auto max-w-readable px-5 py-8">
+      <BackToSubjects />
+      <h1 className="mt-4 text-title">{lesson.title}</h1>
       {lesson.topicTitle && lesson.topicTitle !== lesson.title && (
-        <p className="mt-1 text-sm text-slate">{lesson.topicTitle}</p>
+        <p className="mt-1.5 text-muted">{lesson.topicTitle}</p>
       )}
 
       {hasNothing && (
-        <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
-          The rest of this lesson isn&rsquo;t saved yet. Connect to the internet once to
-          save it.
-        </p>
+        <Callout tone="neutral" className="mt-6" title="The rest of this lesson isn't saved yet">
+          Connect to the internet once to save it.
+        </Callout>
       )}
 
       {lesson.material && (
         <section className="mt-8">
-          <h2 className="text-lg font-semibold">Lesson material</h2>
+          <h2 className="text-heading">Lesson material</h2>
 
           {lesson.file && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <a
+              <ButtonAnchor
                 href={`/api/lessons/${lesson.lessonId}/file`}
                 target={lesson.file.inline ? "_blank" : undefined}
-                className="inline-flex items-center gap-2 rounded-lg border border-line bg-chalk px-4 py-2 text-sm font-medium text-marker"
               >
                 {lesson.file.inline ? "View the original file" : "Download the original file"}
-                <span className="font-normal text-slate">
+                <span className="font-normal text-muted">
                   ({formatBytes(lesson.file.size)})
                 </span>
-              </a>
+              </ButtonAnchor>
 
               {fileSaved ? (
-                <span className="text-xs text-slate">Saved on your phone</span>
+                <span className="text-xs text-muted">Saved on your phone</span>
               ) : (
                 online && (
-                  <button
-                    type="button"
-                    onClick={() => void onSaveFile()}
-                    disabled={savingFile}
-                    className="rounded-lg border border-line px-3 py-2 text-sm text-slate disabled:opacity-60"
-                  >
+                  <Button variant="ghost" onClick={() => void onSaveFile()} disabled={savingFile}>
                     {savingFile ? "Saving…" : "Save it for offline"}
-                  </button>
+                  </Button>
                 )
               )}
             </div>
@@ -242,41 +234,66 @@ export default function LessonReaderView({
             rather than rendering a download link the service worker cannot serve.
           */}
           {unsavedFile && (
-            <p className="mt-3 rounded-lg border border-line bg-paper px-3 py-2 text-xs text-slate">
+            <Callout tone="neutral" className="mt-3">
               The original file ({unsavedFile.name}) isn&rsquo;t saved on your phone.
               You can still read the lesson text below.
-            </p>
+            </Callout>
           )}
 
-          {fileError && <p className="mt-2 text-xs text-flag">{fileError}</p>}
+          {fileError && (
+            <Callout tone="danger" className="mt-3">
+              {fileError}
+            </Callout>
+          )}
 
-          <article className="mt-3 whitespace-pre-wrap leading-relaxed">
-            {lesson.material}
-          </article>
+          <article className="prose-lesson mt-4 whitespace-pre-wrap">{lesson.material}</article>
         </section>
       )}
 
       {lesson.studyGuide && (
         <section className="mt-10">
-          <h2 className="text-lg font-semibold">Study guide</h2>
-          <article className="mt-3 whitespace-pre-wrap leading-relaxed">
+          <h2 className="text-heading">Study guide</h2>
+          <article className="prose-lesson mt-4 whitespace-pre-wrap">
             {lesson.studyGuide.summary}
           </article>
 
-          <h3 className="mt-6 font-semibold">Practice</h3>
-          <ol className="mt-3 space-y-3">
+          <h3 className="mt-8 text-subheading font-semibold">Practice</h3>
+          <ol className="mt-3 space-y-2.5">
             {lesson.studyGuide.questions.map((q) => (
-              <li
-                key={q.number}
-                className="flex gap-3 rounded-lg border border-line bg-chalk p-4"
-              >
-                <span className="shrink-0 text-slate">{q.number}.</span>
-                <span>{q.question}</span>
-              </li>
+              <Card as="li" key={q.number} className="flex gap-3 p-4">
+                <span
+                  aria-hidden
+                  className="tabular flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brandSoft text-sm font-semibold text-brand"
+                >
+                  {q.number}
+                </span>
+                <span className="pt-0.5">{q.question}</span>
+              </Card>
             ))}
           </ol>
         </section>
       )}
     </main>
+  );
+}
+
+/** The only way back on a student's phone, so it is a target, not a footnote. */
+function BackToSubjects() {
+  return (
+    <Link
+      href="/student"
+      className="inline-flex min-h-[44px] items-center gap-1.5 text-sm font-medium text-accentText"
+    >
+      <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path
+          d="M10 3.5 5.5 8l4.5 4.5"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      Your subjects
+    </Link>
   );
 }

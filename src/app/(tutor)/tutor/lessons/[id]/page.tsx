@@ -44,11 +44,11 @@ export default async function LessonReviewPage({
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/tutor" className="text-sm text-slate">
+      <Link href="/tutor" className="text-sm text-muted">
         ← Your lessons
       </Link>
-      <h1 className="mt-3 text-2xl font-semibold">{lesson.title}</h1>
-      <p className="mt-1 text-sm text-slate">
+      <h1 className="mt-3 text-title">{lesson.title}</h1>
+      <p className="mt-1 text-sm text-muted">
         {lesson.className}
         {anythingPublished && (
           <>
@@ -83,8 +83,8 @@ export default async function LessonReviewPage({
         }
       />
 
-      <h2 className="mt-10 text-lg font-semibold">Study guide</h2>
-      <p className="mt-1 text-sm text-slate">
+      <h2 className="mt-10 text-heading">Study guide</h2>
+      <p className="mt-1 text-sm text-muted">
         AI summary and practice questions, generated from the material. Publishes
         separately from the material above.
       </p>

@@ -1,14 +1,22 @@
-<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="JDSmartLearn AI">
-  <!-- App icon / avatar: lesson page + AI spark, on a pine tile. -->
-  <rect x="2" y="2" width="60" height="60" rx="16" fill="#0E5A3C"/>
-  <rect x="19" y="15" width="24" height="30" rx="4" fill="#FFFFFF"/>
-  <rect x="24" y="22" width="14" height="2.6" rx="1.3" fill="#0E5A3C"/>
-  <rect x="24" y="28" width="14" height="2.6" rx="1.3" fill="#0E5A3C"/>
-  <rect x="24" y="34" width="9"  height="2.6" rx="1.3" fill="#0E5A3C"/>
-  <path d="M45 9 L46.84 14.16 L52 16 L46.84 17.84 L45 23 L43.16 17.84 L38 16 L43.16 14.16 Z" fill="#C88A1C"/>
-  <!-- AI tab -->
-  <rect x="21" y="48" width="22" height="12" rx="4" fill="#C88A1C"/>
-  <text x="32" y="57.4" text-anchor="middle"
-        font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-        font-size="9" font-weight="700" letter-spacing="0.5" fill="#0A4530">AI</text>
+<svg width="512" height="512" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="JDSmartLearn">
+  <!--
+    Install / app icon, declared `maskable` in the manifest.
+
+    Android crops a maskable icon to an arbitrary shape and may take up to 20%
+    off each edge, so the background is full-bleed and the mark is scaled to ~60%
+    of the tile - inside the safe circle whatever mask a launcher applies.
+  -->
+  <rect width="64" height="64" fill="#FFFFFF"/>
+  <defs>
+    <clipPath id="ilumo-icon-lower-right">
+      <path d="M64 0 L64 64 L0 64 Z"/>
+    </clipPath>
+  </defs>
+  <g transform="translate(8.6 8.6) scale(0.731)">
+    <rect x="6" y="6" width="52" height="52" rx="15" fill="#5FE9B2"/>
+    <g clip-path="url(#ilumo-icon-lower-right)">
+      <rect x="6" y="6" width="52" height="52" rx="15" fill="#3E9BFF"/>
+    </g>
+    <rect x="9" y="23" width="46" height="18" rx="9" fill="#3852D6" transform="rotate(45 32 32)"/>
+  </g>
 </svg>

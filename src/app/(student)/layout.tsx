@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { getStudentSession } from "@/lib/auth/student";
 import SignOutButton from "@/components/SignOutButton";
+import AppHeader from "@/components/ui/AppHeader";
 import StudentShell from "@/components/student/StudentShell";
 
 /**
@@ -15,21 +15,18 @@ export default async function StudentLayout({ children }: { children: React.Reac
 
   return (
     <>
-      <header className="border-b border-line bg-chalk">
-        <div className="mx-auto flex max-w-readable items-center justify-between px-5 py-3">
-          <Link href="/student" className="flex items-center">
-            {/* eslint-disable-next-line @next/next/no-img-element -- local SVG, no optimization needed */}
-            <img src="/logo-horizontal.svg" alt="JDSmartLearn" width={140} height={28} />
-          </Link>
-          {session && (
+      <AppHeader
+        home="/student"
+        action={
+          session && (
             <SignOutButton
               endpoint="/api/student/session"
               redirectTo="/student/sign-in"
               wipeOffline
             />
-          )}
-        </div>
-      </header>
+          )
+        }
+      />
       {session && <StudentShell studentId={session.studentId} />}
       {children}
     </>

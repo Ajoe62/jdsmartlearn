@@ -1,10 +1,14 @@
-<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="JDSmartLearn AI">
-  <!-- ONE-COLOUR fallback. currentColor so you can set it once (default ink). -->
-  <g fill="none" stroke="currentColor" stroke-width="2.4" color="#15221C">
-    <rect x="19" y="16.2" width="24" height="31.6" rx="4"/>
-    <line x1="25" y1="25.3" x2="37" y2="25.3" stroke-linecap="round"/>
-    <line x1="25" y1="31.3" x2="37" y2="31.3" stroke-linecap="round"/>
-    <line x1="25" y1="37.3" x2="33" y2="37.3" stroke-linecap="round"/>
-  </g>
-  <path d="M45 10 L46.84 15.16 L52 17 L46.84 18.84 L45 24 L43.16 18.84 L38 17 L43.16 15.16 Z" fill="currentColor" color="#15221C"/>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ilumo">
+  <!--
+    One-colour mark for print, stamps, and anywhere colour is unavailable.
+
+    The capsule becomes negative space rather than a second tone, so the shape
+    survives a fax, a photocopy, and an embroidery machine. `currentColor` means
+    it inherits from whatever it sits inside.
+  -->
+  <mask id="ilumo-mono-cut">
+    <rect x="6" y="6" width="52" height="52" rx="15" fill="#FFFFFF"/>
+    <rect x="9" y="23" width="46" height="18" rx="9" fill="#000000" transform="rotate(45 32 32)"/>
+  </mask>
+  <rect x="6" y="6" width="52" height="52" rx="15" fill="currentColor" mask="url(#ilumo-mono-cut)"/>
 </svg>

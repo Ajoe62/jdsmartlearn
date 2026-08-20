@@ -90,10 +90,10 @@ export default async function StudentAssignmentPage({
 function NotFound() {
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/student/assignments" className="text-sm text-slate">
+      <Link href="/student/assignments" className="text-sm text-muted">
         Back to your work
       </Link>
-      <p className="mt-6 rounded-lg border border-line bg-chalk p-4 text-slate">
+      <p className="mt-6 rounded-lg border border-line bg-surface p-4 text-muted">
         We couldn&rsquo;t find that assignment. It may have been closed by your teacher.
       </p>
     </main>

@@ -2,6 +2,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import Callout from "@/components/ui/Callout";
+import { Card } from "@/components/ui/Card";
+import Field, { CONTROL } from "@/components/ui/Field";
 import { wipeDevice } from "@/lib/offline/wipe";
 import type { SchoolListing } from "@/lib/db/resultpeak";
 
@@ -50,31 +54,34 @@ export default function SignInForm({
   }
 
   return (
-    <main className="mx-auto max-w-sm px-5 py-16">
-      <h1 className="text-2xl font-semibold">Open your lessons</h1>
-      <p className="mt-2 text-sm text-slate">Your teacher gives you these.</p>
+    <main className="mx-auto max-w-sm px-5 py-12">
+      <h1 className="text-title">Open your lessons</h1>
+      <p className="mt-2 text-muted">Your teacher gives you these.</p>
 
       {expired && (
-        <p className="mt-4 rounded-lg border border-line bg-paper px-3 py-2 text-sm text-slate">
+        <Callout tone="neutral" className="mt-5">
           Sign in again to read your lessons. You&rsquo;ll need internet once.
-        </p>
+        </Callout>
       )}
 
-      <div className="mt-8 space-y-4">
+      <Card className="mt-6 space-y-4 p-4">
         {chosen ? (
-          <p className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper px-3 py-2 text-sm">
+          <p className="flex items-center justify-between gap-3 rounded-lg bg-canvas px-3 py-2.5 text-sm">
             <span className="truncate font-medium">{chosen.name}</span>
-            <Link href="/student/sign-in?school=change" className="shrink-0 text-marker underline">
+            <Link
+              href="/student/sign-in?school=change"
+              className="shrink-0 font-medium text-accentText"
+            >
               Change school
             </Link>
           </p>
         ) : (
-          <label className="block">
-            <span className="text-sm font-medium">Your school</span>
+          <Field label="Your school" htmlFor="school">
             <select
+              id="school"
               value={schoolId}
               onChange={(e) => setSchoolId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
+              className={CONTROL}
             >
               {schools.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -82,52 +89,51 @@ export default function SignInForm({
                 </option>
               ))}
             </select>
-          </label>
+          </Field>
         )}
 
-        <label className="block">
-          <span className="text-sm font-medium">Your username</span>
+        <Field label="Your username" htmlFor="username">
           <input
+            id="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
             placeholder="jss3-04"
-            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2 lowercase"
+            className={`${CONTROL} lowercase`}
           />
-        </label>
+        </Field>
 
-        <label className="block">
-          <span className="text-sm font-medium">Code</span>
+        <Field label="Code" htmlFor="code">
           <input
+            id="code"
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             autoCapitalize="characters"
             autoCorrect="off"
             spellCheck={false}
-            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2 text-lg tracking-widest"
+            // Set in the display face with even tracking: this is read off a
+            // slip of paper and typed one character at a time.
+            className={`${CONTROL} tabular text-lg tracking-[0.25em]`}
           />
-        </label>
+        </Field>
 
-        {error && (
-          <p className="rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
-        )}
+        {error && <Callout tone="danger">{error}</Callout>}
 
         {schools.length === 0 && (
-          <p className="rounded-lg border border-line bg-paper px-3 py-2 text-sm text-slate">
-            No schools are set up yet. Ask your teacher.
-          </p>
+          <Callout tone="neutral">No schools are set up yet. Ask your teacher.</Callout>
         )}
 
-        <button
+        <Button
           onClick={signIn}
           disabled={busy || !username || !code || !schoolId}
-          className="w-full rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
+          size="lg"
+          full
         >
           {busy ? "Opening…" : "Open my lessons"}
-        </button>
-      </div>
+        </Button>
+      </Card>
     </main>
   );
 }

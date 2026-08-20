@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import { CONTROL } from "@/components/ui/Field";
 
 /**
  * Edit title + material after creation; admins can also move the lesson to a
@@ -65,17 +67,17 @@ export default function EditLessonSection({
             setOpen(true);
             setSaved(false);
           }}
-          className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-slate"
+          className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-muted"
         >
           Edit lesson
         </button>
-        {saved && <span className="ml-3 text-sm text-success">Saved.</span>}
+        {saved && <span className="ml-3 text-sm text-successText">Saved.</span>}
       </div>
     );
   }
 
   return (
-    <section className="mt-4 rounded-lg border border-line bg-chalk p-4">
+    <section className="mt-4 rounded-lg border border-line bg-surface p-4">
       <h2 className="font-semibold">Edit lesson</h2>
 
       <label className="mt-4 block">
@@ -83,7 +85,7 @@ export default function EditLessonSection({
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
+          className={CONTROL}
         />
       </label>
 
@@ -93,7 +95,7 @@ export default function EditLessonSection({
           <select
             value={classId}
             onChange={(e) => setClassId(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
+            className={CONTROL}
           >
             {classes.map((c) => (
               <option key={c.id} value={c.id}>
@@ -102,7 +104,7 @@ export default function EditLessonSection({
             ))}
           </select>
           {movingClass && anythingPublished && (
-            <p className="mt-1 text-xs text-brassText">
+            <p className="mt-1 text-xs text-accentText">
               Students in the current class will lose access; the new class gains it.
             </p>
           )}
@@ -115,10 +117,10 @@ export default function EditLessonSection({
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={10}
-          className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2 text-sm leading-relaxed"
+          className={`${CONTROL} text-sm leading-relaxed`}
         />
         {editingText && hasStudyGuide && (
-          <p className="mt-1 text-xs text-brassText">
+          <p className="mt-1 text-xs text-accentText">
             The study guide was made from the old text — regenerate it after saving
             so they match.
           </p>
@@ -126,18 +128,15 @@ export default function EditLessonSection({
       </label>
 
       {error && (
-        <p className="mt-3 rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
+        <p className="mt-3 rounded-lg bg-dangerSoft px-3 py-2 text-sm text-danger">{error}</p>
       )}
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-        <button
-          onClick={save}
-          disabled={busy}
-          className="rounded-lg bg-marker px-4 py-2 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
-        >
+        <Button onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save changes"}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="secondary"
           onClick={() => {
             setOpen(false);
             setTitle(initialTitle);
@@ -146,10 +145,10 @@ export default function EditLessonSection({
             setError(null);
           }}
           disabled={busy}
-          className="rounded-lg border border-line px-4 py-2 font-medium text-slate disabled:opacity-50"
+          className="text-muted"
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </section>
   );

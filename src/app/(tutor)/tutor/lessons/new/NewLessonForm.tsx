@@ -1,6 +1,10 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import Callout from "@/components/ui/Callout";
+import { Card, CardHeader } from "@/components/ui/Card";
+import Field, { CONTROL } from "@/components/ui/Field";
 import { newLocalId, queueOp } from "@/lib/offline/tutor-outbox";
 import type { ClassLevel } from "@/types";
 
@@ -214,274 +218,300 @@ export default function NewLessonForm({
     }
   }
 
+
   return (
-    <div className="mt-8 space-y-5">
+    <div className="mt-6 space-y-5">
       {!online && (
-        <div
-          role="status"
-          className="rounded-lg border border-line bg-paper px-4 py-3 text-sm"
-        >
-          <p className="font-medium">You&rsquo;re offline</p>
-          <p className="mt-1 text-slate">
-            You can still write this lesson. It will upload when you&rsquo;re back
-            online, and you can create the study materials then.
-          </p>
-        </div>
+        <Callout tone="neutral" title="You're offline">
+          You can still write this lesson. It will upload when you&rsquo;re back online,
+          and you can create the study materials then.
+        </Callout>
       )}
 
-      <label className="block">
-        <span className="text-sm font-medium">Class</span>
-        <select
-          value={classId}
-          onChange={(e) => {
-            setClassId(e.target.value);
-            setTopicId(""); // level may change, invalidating the topic
-          }}
-          className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
-        >
-          <option value="">Choose a class</option>
-          {classes.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* Step one: where the lesson goes. Kept apart from the lesson itself so a
+          teacher doing this for the first time meets three short questions
+          before a blank text box, not all of it at once. */}
+      <Card>
+        <CardHeader title="Which class is this for?" />
+        <div className="space-y-4 p-4">
+          <Field label="Class" htmlFor="lesson-class">
+            <select
+              id="lesson-class"
+              value={classId}
+              onChange={(e) => {
+                setClassId(e.target.value);
+                setTopicId(""); // level may change, invalidating the topic
+              }}
+              className={CONTROL}
+            >
+              <option value="">Choose a class</option>
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
 
-      <label className="block">
-        <span className="text-sm font-medium">Subject</span>
-        <select
-          value={subjectId}
-          onChange={(e) => {
-            setSubjectId(e.target.value);
-            setTopicId("");
-          }}
-          className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
-        >
-          <option value="">Choose a subject</option>
-          {subjects.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </label>
+          <Field label="Subject" htmlFor="lesson-subject">
+            <select
+              id="lesson-subject"
+              value={subjectId}
+              onChange={(e) => {
+                setSubjectId(e.target.value);
+                setTopicId("");
+              }}
+              className={CONTROL}
+            >
+              <option value="">Choose a subject</option>
+              {subjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </Field>
 
-      <label className="block">
-        <span className="text-sm font-medium">Topic</span>
-        <select
-          value={topicId}
-          onChange={(e) => chooseTopic(e.target.value)}
-          disabled={!subjectId}
-          className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2 disabled:opacity-50"
-        >
-          <option value="">
-            {!subjectId
-              ? "Choose a subject first"
-              : topicOptions.length === 0
-                ? "No topics for this subject and class"
-                : "Choose a topic"}
-          </option>
-          {topicOptions.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.title}
-            </option>
-          ))}
-        </select>
-      </label>
+          <Field label="Topic" htmlFor="lesson-topic">
+            <select
+              id="lesson-topic"
+              value={topicId}
+              onChange={(e) => chooseTopic(e.target.value)}
+              disabled={!subjectId}
+              className={CONTROL}
+            >
+              <option value="">
+                {!subjectId
+                  ? "Choose a subject first"
+                  : topicOptions.length === 0
+                    ? "No topics for this subject and class"
+                    : "Choose a topic"}
+              </option>
+              {topicOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.title}
+                </option>
+              ))}
+            </select>
+          </Field>
 
-      {subjectId && !showAddTopic && (
-        online ? (
-          <button
-            type="button"
-            onClick={() => setShowAddTopic(true)}
-            className="text-sm font-medium text-marker"
-          >
-            + Add your own topic
-          </button>
-        ) : (
-          // Creating a topic writes to Firestore immediately, so it cannot be
-          // queued - the lesson that follows needs a real topic id.
-          <p className="text-xs text-slate">
-            You&rsquo;ll need internet to add your own topic.
-          </p>
-        )
-      )}
-
-      {subjectId && showAddTopic && (
-        <div className="rounded-lg border border-line bg-chalk p-4">
-          <p className="text-sm font-medium">Add your own topic</p>
-
-          <label className="mt-3 block">
-            <span className="text-sm">Topic title</span>
-            <input
-              type="text"
-              value={newTopicTitle}
-              onChange={(e) => setNewTopicTitle(e.target.value)}
-              placeholder="e.g. Photosynthesis"
-              className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
-            />
-          </label>
-
-          <div className="mt-3 flex gap-3">
-            <label className="block flex-1">
-              <span className="text-sm">Term</span>
-              <select
-                value={newTopicTerm}
-                onChange={(e) => setNewTopicTerm(Number(e.target.value) as 1 | 2 | 3)}
-                className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
-              >
-                <option value={1}>1st term</option>
-                <option value={2}>2nd term</option>
-                <option value={3}>3rd term</option>
-              </select>
-            </label>
-
-            {!level && (
-              <label className="block flex-1">
-                <span className="text-sm">Class level</span>
-                <select
-                  value={newTopicLevel}
-                  onChange={(e) => setNewTopicLevel(e.target.value as ClassLevel | "")}
-                  className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
-                >
-                  <option value="">Choose a level</option>
-                  {ALL_LEVELS.map((l) => (
-                    <option key={l} value={l}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
-
-          {addTopicError && (
-            <p className="mt-3 rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">
-              {addTopicError}
-            </p>
+          {subjectId && !showAddTopic && (
+            online ? (
+              <Button variant="ghost" onClick={() => setShowAddTopic(true)}>
+                + Add your own topic
+              </Button>
+            ) : (
+              // Creating a topic writes to Firestore immediately, so it cannot be
+              // queued - the lesson that follows needs a real topic id.
+              <p className="text-sm text-muted">
+                You&rsquo;ll need internet to add your own topic.
+              </p>
+            )
           )}
 
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={addTopic}
-              disabled={addingTopic || newTopicTitle.trim().length < 3}
-              className="rounded-lg bg-marker px-4 py-2 text-sm font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
-            >
-              {addingTopic ? "Adding…" : "Add topic"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowAddTopic(false);
-                setAddTopicError(null);
-              }}
-              className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-slate"
-            >
-              Cancel
-            </button>
+          {subjectId && showAddTopic && (
+            <div className="rounded-lg border border-line bg-canvas p-4">
+              <p className="font-medium">Add your own topic</p>
+
+              <div className="mt-3 space-y-3">
+                <Field label="Topic title" htmlFor="new-topic-title">
+                  <input
+                    id="new-topic-title"
+                    type="text"
+                    value={newTopicTitle}
+                    onChange={(e) => setNewTopicTitle(e.target.value)}
+                    placeholder="e.g. Photosynthesis"
+                    className={CONTROL}
+                  />
+                </Field>
+
+                <div className="flex gap-3">
+                  <Field label="Term" htmlFor="new-topic-term" className="flex-1">
+                    <select
+                      id="new-topic-term"
+                      value={newTopicTerm}
+                      onChange={(e) => setNewTopicTerm(Number(e.target.value) as 1 | 2 | 3)}
+                      className={CONTROL}
+                    >
+                      <option value={1}>1st term</option>
+                      <option value={2}>2nd term</option>
+                      <option value={3}>3rd term</option>
+                    </select>
+                  </Field>
+
+                  {!level && (
+                    <Field label="Class level" htmlFor="new-topic-level" className="flex-1">
+                      <select
+                        id="new-topic-level"
+                        value={newTopicLevel}
+                        onChange={(e) => setNewTopicLevel(e.target.value as ClassLevel | "")}
+                        className={CONTROL}
+                      >
+                        <option value="">Choose a level</option>
+                        {ALL_LEVELS.map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
+                </div>
+              </div>
+
+              {addTopicError && (
+                <Callout tone="danger" className="mt-3">
+                  {addTopicError}
+                </Callout>
+              )}
+
+              <div className="mt-4 flex gap-2">
+                <Button
+                  onClick={addTopic}
+                  disabled={addingTopic || newTopicTitle.trim().length < 3}
+                >
+                  {addingTopic ? "Adding…" : "Add topic"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setShowAddTopic(false);
+                    setAddTopicError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Step two: the lesson itself. */}
+      <Card>
+        <CardHeader title="Your lesson" />
+        <div className="space-y-4 p-4">
+          <Field label="Lesson title" htmlFor="lesson-title">
+            <input
+              id="lesson-title"
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Introduction to fractions"
+              className={CONTROL}
+            />
+          </Field>
+
+          <div>
+            <span className="text-sm font-medium">Lesson content</span>
+            <div className="mt-1.5 flex gap-2" role="tablist" aria-label="Lesson content">
+              <ModeTab
+                active={mode === "paste"}
+                onClick={() => setMode("paste")}
+                label="Paste text"
+              />
+              <ModeTab
+                active={mode === "upload"}
+                onClick={() => setMode("upload")}
+                disabled={!online}
+                label="Upload a file"
+              />
+            </div>
+
+            {!online && (
+              <p className="mt-2 text-sm text-muted">
+                You&rsquo;ll need internet to upload a file. We can only check a file can
+                be read once it reaches us.
+              </p>
+            )}
+
+            {mode === "paste" ? (
+              <>
+                <textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  rows={8}
+                  placeholder="Paste the lesson here."
+                  aria-label="Lesson text"
+                  className={`${CONTROL} mt-2`}
+                />
+                <p className="mt-1.5 text-sm text-muted">
+                  {text.trim().length < MIN_CHARS
+                    ? `At least ${MIN_CHARS} characters (${text.trim().length} so far).`
+                    : `${text.trim().length} characters.`}
+                </p>
+              </>
+            ) : (
+              <div className="mt-2">
+                <input
+                  type="file"
+                  accept=".pdf,.docx,.txt"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  aria-label="Lesson file"
+                  className="w-full rounded-lg border border-dashed border-lineStrong bg-canvas p-3 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white"
+                />
+                <p className="mt-1.5 text-sm text-muted">
+                  PDF, Word (.docx), or text file, up to 10 MB. Students can open the
+                  original file once you publish the material.
+                </p>
+              </div>
+            )}
           </div>
         </div>
-      )}
+      </Card>
 
-      <label className="block">
-        <span className="text-sm font-medium">Lesson title</span>
-        <input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="e.g. Introduction to fractions"
-          className="mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2"
-        />
-      </label>
+      {error && <Callout tone="danger" title="That didn't work">{error}</Callout>}
 
       <div>
-        <span className="text-sm font-medium">Lesson content</span>
-        <div className="mt-1 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setMode("paste")}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-              mode === "paste" ? "bg-markerSoft text-marker" : "border border-line text-slate"
-            }`}
-          >
-            Paste text
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("upload")}
-            disabled={!online}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-              mode === "upload" ? "bg-markerSoft text-marker" : "border border-line text-slate"
-            }`}
-          >
-            Upload a file
-          </button>
-        </div>
+        <Button onClick={submit} disabled={!canSubmit || busy} size="lg" full>
+          {online
+            ? busy
+              ? "Creating…"
+              : "Create draft"
+            : busy
+              ? "Saving…"
+              : "Save on my phone"}
+        </Button>
 
-        {!online && (
-          <p className="mt-2 text-xs text-slate">
-            You&rsquo;ll need internet to upload a file. We can only check a file can
-            be read once it reaches us.
+        {/* Say what is missing rather than leaving a dead button unexplained. */}
+        {!canSubmit && missing.length > 0 && (
+          <p className="mt-2 text-center text-sm text-muted">
+            {online ? "To create the draft: " : "To save this lesson: "}
+            {missing.join(", ")}.
           </p>
         )}
-
-        {mode === "paste" ? (
-          <>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              rows={8}
-              placeholder="Paste the lesson here."
-              className="mt-2 w-full rounded-lg border border-line bg-chalk px-3 py-2"
-            />
-            <p className="mt-1 text-xs text-slate">
-              {text.trim().length < MIN_CHARS
-                ? `At least ${MIN_CHARS} characters (${text.trim().length} so far).`
-                : `${text.trim().length} characters.`}
-            </p>
-          </>
-        ) : (
-          <div className="mt-2">
-            <input
-              type="file"
-              accept=".pdf,.docx,.txt"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="w-full text-sm"
-            />
-            <p className="mt-1 text-xs text-slate">
-              PDF, Word (.docx), or text file, up to 10 MB. Students can open the
-              original file once you publish the material.
-            </p>
-          </div>
-        )}
       </div>
-
-      {error && (
-        <p className="rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
-      )}
-
-      <button
-        onClick={submit}
-        disabled={!canSubmit || busy}
-        className="w-full rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
-      >
-        {online
-          ? busy
-            ? "Creating…"
-            : "Create draft"
-          : busy
-            ? "Saving…"
-            : "Save on my phone"}
-      </button>
-
-      {!canSubmit && missing.length > 0 && (
-        <p className="text-center text-xs text-slate">
-          {online ? "To create the draft: " : "To save this lesson: "}
-          {missing.join(", ")}.
-        </p>
-      )}
     </div>
+  );
+}
+
+/** The paste/upload switch. A segmented control, not two loose buttons. */
+function ModeTab({
+  active,
+  onClick,
+  disabled,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      disabled={disabled}
+      className={
+        "min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 " +
+        (active
+          ? "bg-brand text-white"
+          : "border border-line bg-surface text-muted hover:border-lineStrong")
+      }
+    >
+      {label}
+    </button>
   );
 }

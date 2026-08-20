@@ -71,7 +71,7 @@ export default function MaterialSection({
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div>
           <h2 className="font-medium">Lesson material</h2>
-          <p className="mt-0.5 text-xs text-slate">
+          <p className="mt-0.5 text-xs text-muted">
             {published
               ? "Published — students in this class can read it."
               : "Only you can see this. Publish it to share it with students."}
@@ -82,27 +82,27 @@ export default function MaterialSection({
           disabled={busy}
           className={
             published
-              ? "shrink-0 rounded-lg border border-line px-3 py-2 text-sm font-medium text-slate disabled:opacity-50"
-              : "shrink-0 rounded-lg bg-marker px-3 py-2 text-sm font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
+              ? "shrink-0 rounded-lg border border-line px-3 py-2 text-sm font-medium text-muted disabled:opacity-50"
+              : "shrink-0 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brandHover disabled:opacity-50"
           }
         >
           {busy ? "Saving…" : published ? "Hide from students" : "Publish material"}
         </button>
       </div>
 
-      {error && <p className="px-4 pt-3 text-sm text-flag">{error}</p>}
+      {error && <p className="px-4 pt-3 text-sm text-danger">{error}</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2">
         {file ? (
           <a
             href={`/api/lessons/${lessonId}/file`}
             target="_blank"
-            className="text-sm font-medium text-marker"
+            className="text-sm font-medium text-brand"
           >
-            {file.name} <span className="font-normal text-slate">({file.sizeLabel})</span>
+            {file.name} <span className="font-normal text-muted">({file.sizeLabel})</span>
           </a>
         ) : (
-          <span className="text-sm text-slate">
+          <span className="text-sm text-muted">
             No original file attached — students see the text below.
           </span>
         )}
@@ -119,13 +119,13 @@ export default function MaterialSection({
         <button
           onClick={() => fileInput.current?.click()}
           disabled={uploading}
-          className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-slate disabled:opacity-50"
+          className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted disabled:opacity-50"
         >
           {uploading ? "Uploading…" : file ? "Replace file" : "Attach file"}
         </button>
       </div>
 
-      <div className="max-h-64 overflow-y-auto whitespace-pre-wrap px-4 py-3 text-sm leading-relaxed text-slate">
+      <div className="max-h-64 overflow-y-auto whitespace-pre-wrap px-4 py-3 text-sm leading-relaxed text-muted">
         {materialText}
       </div>
     </section>

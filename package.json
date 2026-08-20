@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "check:brand": "tsx scripts/check-contrast.ts && tsx scripts/check-tokens.ts",
     "test:offline": "tsx --test scripts/test-offline.ts",
     "seed:topics": "tsx scripts/seed-topics.ts",
     "backfill:payload": "tsx scripts/backfill-student-payload.ts",

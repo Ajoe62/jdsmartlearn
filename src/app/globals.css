@@ -3,22 +3,63 @@
 @tailwind utilities;
 
 :root {
+  /* Body copy stays on the system stack: zero bytes, paints on the first frame.
+     --font-display is injected by next/font in layout.tsx and carries headings,
+     the wordmark and numerals. See docs/ilumo-brand.md. */
   --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Anchor links land below the sticky header rather than under it. */
+  scroll-padding-top: 5rem;
+}
 
 body {
-  background: theme(colors.paper);
+  background: theme(colors.canvas);
   color: theme(colors.ink);
   font-family: var(--font-body);
   line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings carry the display face and set tighter than body copy. `text-wrap:
+   balance` evens out the rag on a two-line heading; unsupported browsers just
+   ignore it. */
+h1, h2, h3 {
+  font-family: theme(fontFamily.display);
+  font-weight: 600;
+  text-wrap: balance;
 }
 
 /* Touch targets sized for phones held one-handed in a classroom. */
 button, a[role="button"], input, select, textarea { min-height: 44px; }
 
-:focus-visible { outline: 2px solid theme(colors.marker); outline-offset: 2px; }
+input::placeholder, textarea::placeholder { color: theme(colors.muted); opacity: 0.8; }
+
+:focus-visible {
+  outline: 2px solid theme(colors.brand);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Lesson prose: the student reader is the one screen where measure and rhythm
+   matter more than density. Applied to server-rendered and IndexedDB-rendered
+   content alike, since both paths share one component. */
+.prose-lesson {
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  max-width: 68ch;
+}
+.prose-lesson p + p { margin-top: 1em; }
+
+/* Numerals in the display face, aligned in columns - scores, counts, marks. */
+.tabular {
+  font-family: theme(fontFamily.display);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

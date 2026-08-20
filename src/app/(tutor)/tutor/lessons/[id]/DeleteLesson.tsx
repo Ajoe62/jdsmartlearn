@@ -37,18 +37,18 @@ export default function DeleteLesson({
   }
 
   return (
-    <section className="mt-12 rounded-lg border border-flagSoft p-4">
-      <h2 className="text-sm font-medium text-flag">Delete this lesson</h2>
-      <p className="mt-1 text-xs text-slate">
+    <section className="mt-12 rounded-lg border border-dangerSoft p-4">
+      <h2 className="text-sm font-medium text-danger">Delete this lesson</h2>
+      <p className="mt-1 text-xs text-muted">
         Removes the lesson and its study guide for good. This cannot be undone.
       </p>
       {error && (
-        <p className="mt-3 rounded-lg bg-flagSoft px-3 py-2 text-sm text-flag">{error}</p>
+        <p className="mt-3 rounded-lg bg-dangerSoft px-3 py-2 text-sm text-danger">{error}</p>
       )}
       <button
         onClick={remove}
         disabled={busy}
-        className="mt-3 rounded-lg border border-flag px-4 py-2 text-sm font-medium text-flag disabled:opacity-50"
+        className="mt-3 rounded-lg border border-danger px-4 py-2 text-sm font-medium text-danger disabled:opacity-50"
       >
         {busy ? "Deleting…" : "Delete lesson"}
       </button>

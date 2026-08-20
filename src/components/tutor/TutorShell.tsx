@@ -39,9 +39,9 @@ export default function TutorShell({ uid }: { uid: string }) {
     <>
       {wipedNotice && (
         <div className="mx-auto max-w-readable px-5 pt-6">
-          <div className="rounded-lg border border-line bg-paper p-4 text-sm">
+          <div className="rounded-lg border border-line bg-canvas p-4 text-sm">
             <p className="font-medium">Saved changes on this phone were cleared</p>
-            <p className="mt-1 text-slate">
+            <p className="mt-1 text-muted">
               This phone was last used by a different teacher, or the sign-in expired.
               Anything not yet uploaded is gone.
             </p>

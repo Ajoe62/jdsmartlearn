@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
+import { CONTROL } from "@/components/ui/Field";
 import { RESULTPEAK_TERMS } from "@/lib/academic-calendar";
 
 /**
@@ -16,7 +18,6 @@ import { RESULTPEAK_TERMS } from "@/lib/academic-calendar";
  * Nothing here trims or reshapes what is chosen.
  */
 
-const FIELD = "mt-1 w-full rounded-lg border border-line bg-chalk px-3 py-2";
 
 interface ObservedSession {
   session: string;
@@ -83,7 +84,7 @@ export default function SchoolSettingsForm({
     <div className="mt-8 space-y-6">
       <label className="block">
         <span className="text-sm font-medium">Current term</span>
-        <select value={term} onChange={(e) => setTerm(e.target.value)} className={FIELD}>
+        <select value={term} onChange={(e) => setTerm(e.target.value)} className={CONTROL}>
           <option value="">Choose a term</option>
           {RESULTPEAK_TERMS.map((t) => (
             <option key={t} value={t}>
@@ -102,9 +103,9 @@ export default function SchoolSettingsForm({
               value={session}
               onChange={(e) => setSession(e.target.value)}
               placeholder="2025/2026"
-              className={FIELD}
+              className={CONTROL}
             />
-            <p className="mt-2 rounded-lg border border-line bg-paper p-3 text-sm">
+            <p className="mt-2 rounded-lg border border-line bg-canvas p-3 text-sm">
               <span className="font-medium">Read this before saving.</span> Your school
               has never used this session in ResultPeak. Work counted under it will not
               appear on any result sheet until ResultPeak uses the same session, spelled
@@ -112,7 +113,7 @@ export default function SchoolSettingsForm({
             </p>
           </>
         ) : sessions.length === 0 ? (
-          <p className="mt-1 rounded-lg border border-line bg-chalk p-4 text-sm text-slate">
+          <p className="mt-1 rounded-lg border border-line bg-surface p-4 text-sm text-muted">
             No exams or results in ResultPeak yet, so there is no session to match. Turn
             on the option below to enter one.
           </p>
@@ -121,7 +122,7 @@ export default function SchoolSettingsForm({
             <select
               value={session}
               onChange={(e) => setSession(e.target.value)}
-              className={FIELD}
+              className={CONTROL}
             >
               <option value="">Choose a session</option>
               {sessions.map((s) => (
@@ -131,7 +132,7 @@ export default function SchoolSettingsForm({
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-sm text-slate">
+            <p className="mt-1 text-sm text-muted">
               These are the sessions your school&rsquo;s own exams and results already
               use. Pick the one your marks should join.
             </p>
@@ -150,7 +151,7 @@ export default function SchoolSettingsForm({
           />
           <span className="text-sm">
             Use a session that is not in my data
-            <span className="block text-slate">
+            <span className="block text-muted">
               Only if your school is starting a new session that has no exams yet.
             </span>
           </span>
@@ -160,7 +161,7 @@ export default function SchoolSettingsForm({
       <div>
         <span className="text-sm font-medium">Which column LMS marks count towards</span>
         {assessmentTypes.length === 0 ? (
-          <p className="mt-1 rounded-lg border border-line bg-chalk p-4 text-sm text-slate">
+          <p className="mt-1 rounded-lg border border-line bg-surface p-4 text-sm text-muted">
             Your school has not set up its assessment structure in ResultPeak yet. Do
             that first, then come back here.
           </p>
@@ -169,7 +170,7 @@ export default function SchoolSettingsForm({
             <select
               value={lmsType}
               onChange={(e) => setLmsType(e.target.value)}
-              className={FIELD}
+              className={CONTROL}
             >
               <option value="">Not set. Marks stay in JDSmartLearn only</option>
               {assessmentTypes.map((t) => (
@@ -178,7 +179,7 @@ export default function SchoolSettingsForm({
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-sm text-slate">
+            <p className="mt-1 text-sm text-muted">
               While this is not set, marks you release stay in JDSmartLearn and are not
               sent to ResultPeak. Nothing is guessed for you: if your school has no
               column for coursework, leave it unset and add one in ResultPeak first.
@@ -188,24 +189,24 @@ export default function SchoolSettingsForm({
       </div>
 
       {error && (
-        <p role="alert" className="rounded-lg border border-line bg-paper p-3 text-sm">
+        <p role="alert" className="rounded-lg border border-line bg-canvas p-3 text-sm">
           {error}
         </p>
       )}
       {saved && (
-        <p role="status" className="rounded-lg border border-line bg-paper p-3 text-sm">
+        <p role="status" className="rounded-lg border border-line bg-canvas p-3 text-sm">
           Saved. New assignments will use {term}, {session}.
         </p>
       )}
 
-      <button
-        type="button"
+      <Button
         onClick={() => void save()}
         disabled={busy || !term || !session}
-        className="w-full rounded-lg bg-marker px-4 py-3 font-medium text-chalk hover:bg-markerDark disabled:opacity-50"
+        size="lg"
+        full
       >
         {busy ? "Saving" : "Save settings"}
-      </button>
+      </Button>
     </div>
   );
 }
