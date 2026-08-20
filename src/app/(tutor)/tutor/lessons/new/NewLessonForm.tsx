@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import Callout from "@/components/ui/Callout";
 import { Card, CardHeader } from "@/components/ui/Card";
 import Field, { CONTROL } from "@/components/ui/Field";
+import { classesForSubject, subjectsForClass } from "@/lib/auth/subject-access";
 import { newLocalId, queueOp } from "@/lib/offline/tutor-outbox";
 import type { ClassLevel } from "@/types";
 
@@ -24,10 +25,13 @@ export default function NewLessonForm({
   classes,
   subjects,
   topics,
+  teachable,
 }: {
   classes: ClassOpt[];
   subjects: SubjectOpt[];
   topics: TopicOpt[];
+  /** subjectId -> classIds. `{}` means no restriction - see subject-access. */
+  teachable: Record<string, string[]>;
 }) {
   const router = useRouter();
   const [classId, setClassId] = useState("");
@@ -76,6 +80,21 @@ export default function NewLessonForm({
 
   const selectedClass = classes.find((c) => c.id === classId);
   const level = selectedClass?.level;
+
+  /**
+   * Both directions of the allocation, so the pickers narrow each other: pick a
+   * class and only the subjects taught in it remain; pick a subject and only the
+   * classes it is taught to remain. `teachable` is `{}` for an unallocated tutor
+   * and then both lists stay whole.
+   */
+  const classOptions = useMemo(
+    () => classesForSubject(teachable, classes, subjectId),
+    [teachable, classes, subjectId]
+  );
+  const subjectOptions = useMemo(
+    () => subjectsForClass(teachable, subjects, classId),
+    [teachable, subjects, classId]
+  );
 
   // Topics for the chosen subject, narrowed to the class's level when we know it.
   const topicOptions = useMemo(
@@ -239,13 +258,19 @@ export default function NewLessonForm({
               id="lesson-class"
               value={classId}
               onChange={(e) => {
-                setClassId(e.target.value);
+                const next = e.target.value;
+                setClassId(next);
                 setTopicId(""); // level may change, invalidating the topic
+                // Drop a subject this tutor does not teach in the new class,
+                // rather than leaving a selection the server would refuse.
+                if (subjectId && !subjectsForClass(teachable, subjects, next).some((s) => s.id === subjectId)) {
+                  setSubjectId("");
+                }
               }}
               className={CONTROL}
             >
               <option value="">Choose a class</option>
-              {classes.map((c) => (
+              {classOptions.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
@@ -258,13 +283,17 @@ export default function NewLessonForm({
               id="lesson-subject"
               value={subjectId}
               onChange={(e) => {
-                setSubjectId(e.target.value);
+                const next = e.target.value;
+                setSubjectId(next);
                 setTopicId("");
+                if (classId && !classesForSubject(teachable, classes, next).some((c) => c.id === classId)) {
+                  setClassId("");
+                }
               }}
               className={CONTROL}
             >
               <option value="">Choose a subject</option>
-              {subjects.map((s) => (
+              {subjectOptions.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
                 </option>

@@ -55,6 +55,15 @@ import {
 import { SKIP_ORDER, SKIP_TEXT, detectSkips } from "../src/lib/assessment/skips";
 import { claimRefusal } from "../src/lib/auth/claims";
 import {
+  isUnallocated,
+  teachesSubject,
+  teachesSubjectInClass,
+  teachableMap,
+  subjectsForClass,
+  classesForSubject,
+  type SubjectAllocation,
+} from "../src/lib/auth/subject-access";
+import {
   toStudentAssignment,
   toStudentSubmissionPayload,
 } from "../src/lib/assessment/projection";
@@ -1217,6 +1226,10 @@ const PURE_MODULES = [
   // Not assessment: the claim check behind every tutor request. Pure for the
   // same reason, and the same rules apply to it.
   "src/lib/auth/claims.ts",
+  // The (class, subject) allocation check. Pure because the legacy fallback is
+  // the whole risk of that feature - an unallocated tutor must pass every check
+  // - and that is worth testing against the real function, not a copy.
+  "src/lib/auth/subject-access.ts",
   // Reached as a value import by projection.ts, so it must be held to the rules
   // too or that import would not be legal.
   "src/lib/storage/file-types.ts",
@@ -1730,4 +1743,151 @@ test("the diagnostic scan rejects what it exists to reject", () => {
     diagnosticViolations(`${clean}\nawait db.collection("studentAcademicRecords").get();`).length,
     1
   );
+});
+
+// ---------------------------------------------------------------------------
+// Subject allocation: the (class, subject) scoping, and its legacy fallback
+// ---------------------------------------------------------------------------
+
+/**
+ * The risk in this feature is not that a check is too loose. It is that a check
+ * is too tight on a tutor ResultPeak has not allocated yet - most of them, for
+ * a while - and locks a working account out on deploy. Nearly every case below
+ * is about that direction.
+ */
+
+const ALLOCATED: SubjectAllocation = {
+  isAdmin: false,
+  assignedSubjects: ["mathematics", "further_mathematics"],
+  subjectClasses: {
+    mathematics: ["jss1a", "jss2a"],
+    further_mathematics: ["ss1a"],
+  },
+};
+
+const LEGACY: SubjectAllocation = {
+  isAdmin: false,
+  assignedSubjects: [],
+  subjectClasses: {},
+};
+
+test("an unallocated tutor passes every subject check", () => {
+  assert.equal(isUnallocated(LEGACY), true);
+  assert.equal(teachesSubjectInClass(LEGACY, "jss1a", "mathematics"), true);
+  assert.equal(teachesSubjectInClass(LEGACY, "ss3b", "civic_education"), true);
+  assert.equal(teachesSubject(LEGACY, "anything_at_all"), true);
+});
+
+test("a half-derived profile still counts as unallocated", () => {
+  // ResultPeak writes `assignments` first and derives the rest. A profile caught
+  // between the two must fall back to today's behaviour, not fail every lookup
+  // against an empty map. Both directions of the disagreement.
+  const subjectsOnly: SubjectAllocation = {
+    isAdmin: false,
+    assignedSubjects: ["mathematics"],
+    subjectClasses: {},
+  };
+  const mapOnly: SubjectAllocation = {
+    isAdmin: false,
+    assignedSubjects: [],
+    subjectClasses: { mathematics: ["jss1a"] },
+  };
+
+  assert.equal(isUnallocated(subjectsOnly), true);
+  assert.equal(isUnallocated(mapOnly), true);
+  // The point of the fallback: no lockout on a subject the map does not mention.
+  assert.equal(teachesSubjectInClass(subjectsOnly, "jss1a", "english"), true);
+  assert.equal(teachesSubjectInClass(mapOnly, "jss9z", "english"), true);
+});
+
+test("an admin is unrestricted, as they are for assignedClasses", () => {
+  const admin: SubjectAllocation = { ...ALLOCATED, isAdmin: true };
+  assert.equal(teachesSubjectInClass(admin, "ss3b", "civic_education"), true);
+  assert.equal(teachesSubject(admin, "civic_education"), true);
+});
+
+test("an allocated tutor is held to their own pairs", () => {
+  assert.equal(isUnallocated(ALLOCATED), false);
+  assert.equal(teachesSubjectInClass(ALLOCATED, "jss1a", "mathematics"), true);
+  assert.equal(teachesSubjectInClass(ALLOCATED, "ss1a", "further_mathematics"), true);
+
+  // Right subject, wrong class.
+  assert.equal(teachesSubjectInClass(ALLOCATED, "ss1a", "mathematics"), false);
+  // Right class, wrong subject - the case that used to expose a marking guide.
+  assert.equal(teachesSubjectInClass(ALLOCATED, "jss1a", "english"), false);
+  // Neither.
+  assert.equal(teachesSubjectInClass(ALLOCATED, "ss3b", "english"), false);
+});
+
+test("teachesSubject ignores the class, for the topics route", () => {
+  // POST /api/topics has no classId at all: a topic is (subject, level, term).
+  assert.equal(teachesSubject(ALLOCATED, "mathematics"), true);
+  assert.equal(teachesSubject(ALLOCATED, "further_mathematics"), true);
+  assert.equal(teachesSubject(ALLOCATED, "english"), false);
+});
+
+test("teachableMap narrows to real subjects and held classes", () => {
+  const map = teachableMap(
+    ALLOCATED,
+    ["mathematics", "further_mathematics", "english"],
+    ["jss1a", "jss2a", "ss1a"]
+  );
+  assert.deepEqual(map, {
+    mathematics: ["jss1a", "jss2a"],
+    further_mathematics: ["ss1a"],
+  });
+
+  // A subject removed in ResultPeak drops out rather than offering a dead option.
+  assert.deepEqual(teachableMap(ALLOCATED, ["mathematics"], ["jss1a", "jss2a", "ss1a"]), {
+    mathematics: ["jss1a", "jss2a"],
+  });
+
+  // A class the tutor no longer holds drops out, and a subject left with no
+  // usable class disappears entirely.
+  assert.deepEqual(
+    teachableMap(ALLOCATED, ["mathematics", "further_mathematics"], ["jss1a"]),
+    { mathematics: ["jss1a"] }
+  );
+});
+
+test("teachableMap returns the empty map for the no-restriction cases", () => {
+  // Both callers read `{}` as "offer everything", so these two must not return
+  // a partially-built map that a picker would treat as a restriction.
+  assert.deepEqual(teachableMap(LEGACY, ["mathematics"], ["jss1a"]), {});
+  assert.deepEqual(
+    teachableMap({ ...ALLOCATED, isAdmin: true }, ["mathematics"], ["jss1a"]),
+    {}
+  );
+});
+
+test("the pickers narrow in both directions", () => {
+  const map = { mathematics: ["jss1a", "jss2a"], further_mathematics: ["ss1a"] };
+  const subjects = [
+    { id: "mathematics" },
+    { id: "further_mathematics" },
+    { id: "english" },
+  ];
+  const classes = [{ id: "jss1a" }, { id: "jss2a" }, { id: "ss1a" }];
+
+  // Given a class, only subjects taught in it.
+  assert.deepEqual(subjectsForClass(map, subjects, "jss1a"), [{ id: "mathematics" }]);
+  assert.deepEqual(subjectsForClass(map, subjects, "ss1a"), [
+    { id: "further_mathematics" },
+  ]);
+  // Given a subject, only the classes it is taught to.
+  assert.deepEqual(classesForSubject(map, classes, "mathematics"), [
+    { id: "jss1a" },
+    { id: "jss2a" },
+  ]);
+
+  // Nothing chosen yet: everything stays on offer in both directions.
+  assert.deepEqual(subjectsForClass(map, subjects, ""), subjects);
+  assert.deepEqual(classesForSubject(map, classes, ""), classes);
+
+  // An empty map is no restriction, matching teachableMap's contract.
+  assert.deepEqual(subjectsForClass({}, subjects, "jss1a"), subjects);
+  assert.deepEqual(classesForSubject({}, classes, "mathematics"), classes);
+
+  // A subject with no entry offers no classes - it is not a licence to pick any.
+  assert.deepEqual(classesForSubject(map, classes, "english"), []);
 });

@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTutorSession } from "@/lib/auth/tutor";
-import { getClassesByIds, getSubjects, listClassesForSchool } from "@/lib/db/resultpeak";
+import {
+  getClassesByIds,
+  getSubjects,
+  getTeachableMap,
+  listClassesForSchool,
+} from "@/lib/db/resultpeak";
 import { listTopics } from "@/lib/db/topics";
 import { classLevel } from "@/lib/class-level";
 import NewLessonForm from "./NewLessonForm";
@@ -23,6 +28,19 @@ export default async function NewLessonPage() {
     listTopics(session.schoolId),
   ]);
 
+  /**
+   * Which subjects this tutor may pick, per class. `{}` means no restriction -
+   * an unallocated tutor or an admin - and the form reads it that way.
+   *
+   * Filtering here is a convenience only. POST /api/lessons re-checks the pair
+   * server-side against the topic's own subject.
+   */
+  const teachable = await getTeachableMap(
+    session.schoolId,
+    session,
+    classes.map((c) => c.id)
+  );
+
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
       <Link href="/tutor" className="text-sm text-muted">
@@ -39,6 +57,7 @@ export default async function NewLessonPage() {
         <NewLessonForm
           classes={classes.map((c) => ({ id: c.id, name: c.name, level: classLevel(c) }))}
           subjects={subjects}
+          teachable={teachable}
           topics={topics.map((t) => ({
             id: t.id,
             subjectId: t.subjectId,

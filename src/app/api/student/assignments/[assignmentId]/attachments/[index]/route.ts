@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getStudentSession } from "@/lib/auth/student";
-import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
+import {
+  getTutorSession,
+  assertClassAccess,
+  assertDocumentSubjectAccess,
+} from "@/lib/auth/tutor";
 import { getAssignment } from "@/lib/db/assignments";
 import { getSubmission, submissionId } from "@/lib/db/submissions";
 import { getFile, STORABLE_TYPES } from "@/lib/storage/provider";
@@ -51,8 +55,16 @@ export async function GET(
     }
     try {
       assertClassAccess(tutor, assignment.classId);
+      // Unlike finalise-assignment and grading-retry, this route has no
+      // "did you set this assignment" check, so class access alone would let a
+      // colleague teaching another subject in the same class pull down a
+      // student's submitted work.
+      assertDocumentSubjectAccess(tutor, assignment);
     } catch {
-      return NextResponse.json({ error: "You don't teach that class." }, { status: 403 });
+      return NextResponse.json(
+        { error: "You don't teach that subject to that class." },
+        { status: 403 }
+      );
     }
     // A tutor names the student explicitly; a student never can.
     const url = new URL(_req.url);

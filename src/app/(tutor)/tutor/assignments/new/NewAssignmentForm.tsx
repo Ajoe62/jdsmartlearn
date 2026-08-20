@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { classesForSubject, subjectsForClass } from "@/lib/auth/subject-access";
 import { CONTROL } from "@/components/ui/Field";
 import { SUBMITTABLE_TYPES } from "@/lib/storage/file-types";
 import { RESULTPEAK_TERMS } from "@/lib/academic-calendar";
@@ -25,6 +26,7 @@ const MIN_GUIDE = 20;
 export default function NewAssignmentForm({
   classes,
   subjects,
+  teachable,
   lessons,
   defaultTerm,
   defaultSession,
@@ -33,6 +35,8 @@ export default function NewAssignmentForm({
 }: {
   classes: ClassOpt[];
   subjects: SubjectOpt[];
+  /** subjectId -> classIds. `{}` means no restriction - see subject-access. */
+  teachable: Record<string, string[]>;
   lessons: LessonOpt[];
   /** Prefilled from the school setting. Never blank. */
   defaultTerm: string;
@@ -61,6 +65,19 @@ export default function NewAssignmentForm({
   const lessonOptions = useMemo(
     () => lessons.filter((l) => l.classId === classId && l.subjectId === subjectId),
     [lessons, classId, subjectId]
+  );
+
+  /**
+   * Both directions of the allocation, so the pickers narrow each other. `{}`
+   * leaves both lists whole, which is the unallocated tutor and the admin.
+   */
+  const classOptions = useMemo(
+    () => classesForSubject(teachable, classes, subjectId),
+    [teachable, classes, subjectId]
+  );
+  const subjectOptions = useMemo(
+    () => subjectsForClass(teachable, subjects, classId),
+    [teachable, subjects, classId]
   );
 
   function toggleFileType(ext: string) {
@@ -140,13 +157,19 @@ export default function NewAssignmentForm({
         <select
           value={classId}
           onChange={(e) => {
-            setClassId(e.target.value);
+            const next = e.target.value;
+            setClassId(next);
             setLinkedLessonId("");
+            // Drop a subject this tutor does not teach in the new class, rather
+            // than leaving a selection the server would refuse.
+            if (subjectId && !subjectsForClass(teachable, subjects, next).some((s) => s.id === subjectId)) {
+              setSubjectId("");
+            }
           }}
           className={CONTROL}
         >
           <option value="">Choose a class</option>
-          {classes.map((c) => (
+          {classOptions.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
             </option>
@@ -159,13 +182,17 @@ export default function NewAssignmentForm({
         <select
           value={subjectId}
           onChange={(e) => {
-            setSubjectId(e.target.value);
+            const next = e.target.value;
+            setSubjectId(next);
             setLinkedLessonId("");
+            if (classId && !classesForSubject(teachable, classes, next).some((c) => c.id === classId)) {
+              setClassId("");
+            }
           }}
           className={CONTROL}
         >
           <option value="">Choose a subject</option>
-          {subjects.map((s) => (
+          {subjectOptions.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>

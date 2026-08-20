@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { JD } from "@/lib/db/collections";
 import { assertWritable } from "@/lib/db/write-guard";
-import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
+import {
+  getTutorSession,
+  assertClassAccess,
+  assertDocumentSubjectAccess,
+} from "@/lib/auth/tutor";
 import { getLesson, countGenerationsToday, writeAuditLog } from "@/lib/db/lessons";
 import { getSubjects } from "@/lib/db/resultpeak";
 import { generateStudyMaterials } from "@/lib/ai/provider";
@@ -23,8 +27,12 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
 
   try {
     assertClassAccess(session, lesson.classId);
+    assertDocumentSubjectAccess(session, lesson);
   } catch {
-    return NextResponse.json({ error: "You don't teach that class." }, { status: 403 });
+    return NextResponse.json(
+      { error: "You don't teach that subject to that class." },
+      { status: 403 }
+    );
   }
 
   const cap = Number(process.env.MAX_GENERATIONS_PER_TUTOR_PER_DAY ?? 20);

@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
+import {
+  getTutorSession,
+  assertClassAccess,
+  assertDocumentSubjectAccess,
+} from "@/lib/auth/tutor";
 import { getLesson, getGeneratedContent } from "@/lib/db/lessons";
 import { countLessonReaders } from "@/lib/db/lesson-views";
 import { listClassesForSchool } from "@/lib/db/resultpeak";
@@ -28,8 +32,12 @@ export default async function LessonReviewPage({
   if (!lesson || lesson.schoolId !== session.schoolId) notFound();
   try {
     assertClassAccess(session, lesson.classId);
+    // This page renders the MARKING GUIDE. Class access alone used to be enough,
+    // which meant every subject teacher sharing a class could read every other's
+    // guide by URL. The author still passes - see assertDocumentSubjectAccess.
+    assertDocumentSubjectAccess(session, lesson);
   } catch {
-    notFound(); // don't reveal lessons for classes this tutor doesn't teach
+    notFound(); // don't reveal lessons this tutor doesn't teach
   }
 
   const anythingPublished = lesson.status === "published" || !!lesson.materialPublishedAt;

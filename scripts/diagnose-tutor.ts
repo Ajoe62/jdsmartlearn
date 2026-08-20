@@ -90,8 +90,20 @@ async function main() {
 
   // 2. ResultPeak tutor profile --------------------------------------------
   // Use the claim's schoolId if present, since that is what the app actually uses.
+  //
+  // An EMPTY claim counts as absent, not as a school. `typeof "" === "string"`
+  // is true, so testing the type alone let a `schoolId: ""` claim win over the
+  // argument and build the path `schools//tutors/{uid}`, which Firestore rejects
+  // outright - crashing this script on precisely the misconfigured account it
+  // exists to diagnose. The app never hits that path: claimRefusal() rejects the
+  // account for `active: false` or the missing school before any lookup.
   const effectiveSchoolId =
-    typeof claimsSchoolId === "string" ? claimsSchoolId : schoolId;
+    typeof claimsSchoolId === "string" && claimsSchoolId !== ""
+      ? claimsSchoolId
+      : schoolId;
+  if (claimsSchoolId === "") {
+    info(`claim schoolId is empty - falling back to the argument (${schoolId}).`);
+  }
   const tutorPath = `${RP.tutors(effectiveSchoolId)}/${tutorUid}`;
   console.log(`\n2. ResultPeak tutor profile  (${tutorPath})`);
 
@@ -109,6 +121,59 @@ async function main() {
     } else {
       assigned = raw as string[];
       ok(`assignedClasses has ${assigned.length} id(s): ${JSON.stringify(assigned)}`);
+    }
+  }
+
+  // 2b. Subject allocation, and which path the guards will take ------------
+  //
+  // The deploy-safety check for (class, subject) scoping. An unallocated tutor
+  // must take the legacy path through every new guard - see isUnallocated() in
+  // src/lib/auth/subject-access.ts. This prints which path a REAL profile takes,
+  // which is the thing worth knowing before merging, not after.
+  console.log("\n2b. Subject allocation  (class, subject scoping)");
+  if (!tutorSnap.exists) {
+    info("skipped - no tutor document.");
+  } else {
+    const data = (tutorSnap.data() ?? {}) as Record<string, unknown>;
+    const assignments = data.assignments;
+    const subjectClasses = (data.subjectClasses ?? {}) as Record<string, string[]>;
+    const assignedSubjects = (data.assignedSubjects ?? []) as string[];
+
+    // Mirrors isUnallocated() exactly: the DERIVED fields, not `assignments`.
+    const unallocated =
+      assignedSubjects.length === 0 || Object.keys(subjectClasses).length === 0;
+
+    if (unallocated) {
+      ok("LEGACY path - not allocated yet, so every subject check passes.");
+      info("This is the safe state. Behaviour is identical to class-only scoping.");
+      if (Array.isArray(assignments) && assignments.length > 0) {
+        bad(
+          `but 'assignments' has ${assignments.length} entry/entries while the derived fields are empty.`
+        );
+        info(
+          "ResultPeak has written the allocation but not derived subjectClasses/assignedSubjects."
+        );
+        info("JDSmartLearn fails OPEN here on purpose, so nothing is locked out.");
+      }
+    } else {
+      ok(`ALLOCATED - subject checks are enforced for this tutor.`);
+      info(`assignedSubjects: ${JSON.stringify(assignedSubjects)}`);
+      for (const [subjectId, classIds] of Object.entries(subjectClasses)) {
+        info(`  ${subjectId} -> ${JSON.stringify(classIds)}`);
+      }
+      // A pair naming a class outside assignedClasses can never be used, because
+      // assertClassAccess runs first.
+      const orphans = Object.entries(subjectClasses).flatMap(([s, ids]) =>
+        (ids ?? []).filter((id) => !assigned.includes(id)).map((id) => `${s}/${id}`)
+      );
+      if (orphans.length > 0) {
+        bad(`pairs naming a class not in assignedClasses: ${JSON.stringify(orphans)}`);
+        info("assertClassAccess runs first, so these are unusable. Fix in ResultPeak.");
+      }
+    }
+    const classTeacherOf = data.classTeacherOf;
+    if (Array.isArray(classTeacherOf) && classTeacherOf.length > 0) {
+      info(`classTeacherOf: ${JSON.stringify(classTeacherOf)} (read here, used nowhere)`);
     }
   }
 

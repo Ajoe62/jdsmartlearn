@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { JD, RP } from "@/lib/db/collections";
-import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
+import {
+  getTutorSession,
+  assertClassAccess,
+  assertSubjectAccess,
+} from "@/lib/auth/tutor";
 import { getSubjects } from "@/lib/db/resultpeak";
 import { createAssignment, writeNotification } from "@/lib/db/assignments";
 import { writeAuditLog } from "@/lib/db/lessons";
@@ -67,8 +71,11 @@ export async function POST(req: Request) {
 
   try {
     assertClassAccess(session, classId);
+    // Both ids come straight off the body here, so the pair is checkable
+    // directly. The subject is validated against the school's list further down.
+    assertSubjectAccess(session, classId, subjectId);
   } catch {
-    return bad("You don't teach that class.", 403);
+    return bad("You don't teach that subject to that class.", 403);
   }
 
   const type = body.type as AssignmentType;

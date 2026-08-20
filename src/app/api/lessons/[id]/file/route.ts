@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
+import {
+  getTutorSession,
+  assertClassAccess,
+  assertDocumentSubjectAccess,
+} from "@/lib/auth/tutor";
 import { getStudentSession } from "@/lib/auth/student";
 import { getLesson } from "@/lib/db/lessons";
 import { getFile } from "@/lib/storage/provider";
@@ -31,11 +35,18 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     }
     try {
       assertClassAccess(tutor, lesson.classId);
+      // Subject scoping applies to the TUTOR branch only. Students have no
+      // allocation; their branch below is gated on their own class plus
+      // materialPublishedAt.
+      assertDocumentSubjectAccess(tutor, lesson);
     } catch {
       console.warn(
-        `[file] ${id}: reject - tutor ${tutor.uid} lacks class ${lesson.classId} (has ${JSON.stringify(tutor.assignedClasses)})`
+        `[file] ${id}: reject - tutor ${tutor.uid} lacks ${lesson.classId}/${lesson.subjectId} (classes ${JSON.stringify(tutor.assignedClasses)})`
       );
-      return NextResponse.json({ error: "You don't teach that class." }, { status: 403 });
+      return NextResponse.json(
+        { error: "You don't teach that class and subject." },
+        { status: 403 }
+      );
     }
   } else {
     const student = await getStudentSession();

@@ -60,9 +60,32 @@ export interface ResultPeakStudent {
   isActive: boolean;
 }
 
+/**
+ * ResultPeak's tutor profile. READ ONLY from here.
+ *
+ * A tutor used to be scoped by class alone. ResultPeak now allocates them by
+ * (class, subject) pair, and the four allocation fields below are all OPTIONAL
+ * because most tutors have not been allocated yet.
+ *
+ * An absent or empty allocation is not an error and is not "no access": it is
+ * the legacy state, and it means every school subject across `assignedClasses`
+ * - exactly the behaviour that shipped before. See src/lib/auth/subject-access.
+ */
 export interface ResultPeakTutor {
+  /** UNCHANGED: still the derived union of every class in `assignments`. */
   assignedClasses: string[];
   name?: string;
+
+  /** The truth, admin-edited in ResultPeak. The three below are derived from it. */
+  assignments?: { classId: string; subjectId: string }[];
+  /** subjectId -> classIds. The map every (class, subject) check reads. */
+  subjectClasses?: Record<string, string[]>;
+  assignedSubjects?: string[];
+  /**
+   * The class-teacher hat, 0 or 1 entry. Informational here and used nowhere:
+   * ResultPeak owns term comments, skill ratings and attendance.
+   */
+  classTeacherOf?: string[];
 }
 
 // ---------- JDSmartLearn-owned (read + write) ----------

@@ -2,6 +2,8 @@ import "server-only";
 import { unstable_cache } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
 import { RP, QUERY_LIMIT } from "./collections";
+import { teachableMap } from "@/lib/auth/subject-access";
+import type { SubjectAllocation } from "@/lib/auth/subject-access";
 import type { ResultPeakClass, ResultPeakSchool, ResultPeakStudent } from "@/types";
 
 /**
@@ -18,6 +20,31 @@ export async function getSchool(schoolId: string): Promise<ResultPeakSchool | nu
 /** Canonical subject list - subject.id is the join key used by topics and exams. */
 export async function getSubjects(schoolId: string) {
   return (await getSchool(schoolId))?.subjects ?? [];
+}
+
+/**
+ * What a picker may offer: subjectId -> classIds, for the tutor's own allocation.
+ *
+ * `{}` means NO RESTRICTION - an unallocated tutor, or an admin - and both forms
+ * read it that way. Keeping that convention in one place is what stops each form
+ * inventing its own idea of the legacy state.
+ *
+ * Costs no extra Firestore read beyond the subject list the pages already fetch,
+ * and nothing here is cached on the device: the allocation is re-read from the
+ * session on every request, exactly as assignedClasses is, so a revocation in
+ * ResultPeak applies immediately (CLAUDE.md, Tutor offline).
+ */
+export async function getTeachableMap(
+  schoolId: string,
+  allocation: SubjectAllocation,
+  heldClassIds: string[]
+): Promise<Record<string, string[]>> {
+  const subjects = await getSubjects(schoolId);
+  return teachableMap(
+    allocation,
+    subjects.map((s) => s.id),
+    heldClassIds
+  );
 }
 
 export async function getClassesByIds(ids: string[]) {

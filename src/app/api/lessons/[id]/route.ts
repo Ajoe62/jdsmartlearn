@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
-import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
+import {
+  getTutorSession,
+  assertClassAccess,
+  assertDocumentSubjectAccess,
+} from "@/lib/auth/tutor";
 import { getLesson, deleteLesson, updateLessonDetails, writeAuditLog } from "@/lib/db/lessons";
 import { getClassesByIds } from "@/lib/db/resultpeak";
 import { studentLessonsTag, lessonViewTag } from "@/lib/db/student-content";
@@ -25,8 +29,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
   try {
     assertClassAccess(session, lesson.classId);
+    assertDocumentSubjectAccess(session, lesson);
   } catch {
-    return NextResponse.json({ error: "You don't teach that class." }, { status: 403 });
+    return NextResponse.json(
+      { error: "You don't teach that subject to that class." },
+      { status: 403 }
+    );
   }
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -144,8 +152,12 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
 
   try {
     assertClassAccess(session, lesson.classId);
+    assertDocumentSubjectAccess(session, lesson);
   } catch {
-    return NextResponse.json({ error: "You don't teach that class." }, { status: 403 });
+    return NextResponse.json(
+      { error: "You don't teach that subject to that class." },
+      { status: 403 }
+    );
   }
 
   await deleteLesson(id);

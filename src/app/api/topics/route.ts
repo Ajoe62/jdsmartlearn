@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTutorSession } from "@/lib/auth/tutor";
+import { getTutorSession, assertSubjectTaught } from "@/lib/auth/tutor";
 import { createCustomTopic } from "@/lib/db/topics";
 import { writeAuditLog } from "@/lib/db/lessons";
 import { getSubjects } from "@/lib/db/resultpeak";
@@ -41,6 +41,19 @@ export async function POST(req: Request) {
   const subjects = await getSubjects(session.schoolId);
   if (!body.subjectId || !subjects.some((s) => s.id === body.subjectId)) {
     return NextResponse.json({ error: "Choose a subject." }, { status: 400 });
+  }
+
+  /**
+   * Subject-only, because this route has no class: a topic is (subject, level,
+   * term), school-wide, and shared by every tutor who teaches that subject. So
+   * the question is "do you teach this subject at all", not "in which class".
+   *
+   * An unallocated tutor still passes, as everywhere else.
+   */
+  try {
+    assertSubjectTaught(session, body.subjectId);
+  } catch {
+    return NextResponse.json({ error: "You don't teach that subject." }, { status: 403 });
   }
 
   const topic = await createCustomTopic({

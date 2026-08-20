@@ -3,7 +3,11 @@ import { revalidateTag } from "next/cache";
 import { extname } from "node:path";
 import { adminDb } from "@/lib/firebase/admin";
 import { JD, RP } from "@/lib/db/collections";
-import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
+import {
+  getTutorSession,
+  assertClassAccess,
+  assertSubjectAccess,
+} from "@/lib/auth/tutor";
 import { extractText, ExtractionError } from "@/lib/extract/text";
 import {
   createLesson,
@@ -80,6 +84,21 @@ export async function POST(req: Request) {
   // Trust the topic for the subject and the roster for the display name.
   const subjectId = topic.subjectId;
   const className = cls.name;
+
+  /**
+   * The subject check has to be HERE, not beside assertClassAccess above: the
+   * client never sends a subject, it sends a topic, and the subject is whatever
+   * that topic carries. Choosing another subject's topic is how a tutor would
+   * otherwise create a lesson outside their allocation.
+   */
+  try {
+    assertSubjectAccess(session, classId, subjectId);
+  } catch {
+    return NextResponse.json(
+      { error: "You don't teach that subject to that class." },
+      { status: 403 }
+    );
+  }
 
   let extractedText = pasted;
   try {

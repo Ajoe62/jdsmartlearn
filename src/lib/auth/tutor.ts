@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { RP } from "@/lib/db/collections";
 import { claimRefusal, isAdmin } from "@/lib/auth/roles";
+import { teachesSubject, teachesSubjectInClass } from "@/lib/auth/subject-access";
 import type { ClaimRefusal } from "@/lib/auth/roles";
 import type { Claims, ResultPeakTutor } from "@/types";
 
@@ -13,6 +14,21 @@ export interface TutorSession {
   /** Admin-level actor (school admin or superadmin) - see lib/auth/roles. */
   isAdmin: boolean;
   assignedClasses: string[];
+
+  /**
+   * Subject allocation, from the same profile read as assignedClasses.
+   *
+   * Empty on both means the tutor has not been allocated yet, which means every
+   * subject - see isUnallocated() in lib/auth/subject-access.
+   *
+   * ResultPeak's authoritative `assignments` array is deliberately NOT carried
+   * here. These two derived fields are what every check reads, and holding the
+   * authoritative one alongside them invites a future check to read that
+   * instead and reintroduce exactly the divergence isUnallocated() guards.
+   */
+  assignedSubjects: string[];
+  /** subjectId -> classIds. */
+  subjectClasses: Record<string, string[]>;
 }
 
 const SESSION_COOKIE = "jd_tutor";
@@ -97,6 +113,10 @@ export async function getTutorSession(): Promise<TutorSession | null> {
       isAdmin: isAdmin(claims) && schoolId === claims.schoolId,
       // Admins are not restricted to assignedClasses.
       assignedClasses: profile?.assignedClasses ?? [],
+      // Same profile read, no extra Firestore cost. Absent on a tutor ResultPeak
+      // has not allocated yet, which is the legacy "every subject" state.
+      assignedSubjects: profile?.assignedSubjects ?? [],
+      subjectClasses: profile?.subjectClasses ?? {},
     };
   } catch {
     return null;
@@ -109,6 +129,53 @@ export function assertClassAccess(session: TutorSession, classId: string): void 
   if (!session.assignedClasses.includes(classId)) {
     throw new Error("FORBIDDEN: class not assigned to this tutor");
   }
+}
+
+/**
+ * Throws unless the tutor teaches this SUBJECT in this CLASS.
+ *
+ * Always call assertClassAccess first - this narrows that check, it does not
+ * replace it. An unallocated tutor passes, which is what keeps every account
+ * working until ResultPeak has allocated them.
+ */
+export function assertSubjectAccess(
+  session: TutorSession,
+  classId: string,
+  subjectId: string
+): void {
+  if (!teachesSubjectInClass(session, classId, subjectId)) {
+    throw new Error("FORBIDDEN: subject not assigned to this tutor for this class");
+  }
+}
+
+/**
+ * Throws unless the tutor teaches this subject somewhere. For POST /api/topics,
+ * which creates a school-wide curriculum row and has no class to check against.
+ */
+export function assertSubjectTaught(session: TutorSession, subjectId: string): void {
+  if (!teachesSubject(session, subjectId)) {
+    throw new Error("FORBIDDEN: subject not assigned to this tutor");
+  }
+}
+
+/**
+ * Whether this tutor may act on a stored document.
+ *
+ * The author always passes. Lessons and assignments created BEFORE allocation
+ * carry whatever subject the then-unfiltered picker offered, so a strict subject
+ * check would 404 a teacher out of their own work - a lesson still listed on
+ * their own dashboard. It also matches the Firestore rules, which already scope
+ * tutor reads to `tutorId == request.auth.uid`.
+ *
+ * What this still closes: a colleague teaching a DIFFERENT subject in the same
+ * class can no longer open the document and read its marking guide.
+ */
+export function assertDocumentSubjectAccess(
+  session: TutorSession,
+  doc: { tutorId: string; classId: string; subjectId: string }
+): void {
+  if (doc.tutorId === session.uid) return;
+  assertSubjectAccess(session, doc.classId, doc.subjectId);
 }
 
 export async function clearTutorSession(): Promise<void> {

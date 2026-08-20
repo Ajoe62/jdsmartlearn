@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTutorSession } from "@/lib/auth/tutor";
-import { getClassesByIds, getSubjects, listClassesForSchool } from "@/lib/db/resultpeak";
+import {
+  getClassesByIds,
+  getSubjects,
+  getTeachableMap,
+  listClassesForSchool,
+} from "@/lib/db/resultpeak";
 import { listLessonsForSchool, listLessonsForTutor } from "@/lib/db/lessons";
 import { storageConfigured } from "@/lib/storage/provider";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
@@ -35,6 +40,19 @@ export default async function NewAssignmentPage() {
      */
     getCurrentTermSession(session.schoolId),
   ]);
+
+  /**
+   * Which subjects this tutor may set work in, per class. `{}` means no
+   * restriction - an unallocated tutor or an admin.
+   *
+   * The form omitting a pair it should not offer is a convenience, not a
+   * control: POST /api/tutor/assignments re-checks it.
+   */
+  const teachable = await getTeachableMap(
+    session.schoolId,
+    session,
+    classes.map((c) => c.id)
+  );
 
   const linkable = lessons
     .filter((l) => l.status === "published" || l.materialPublishedAt)
@@ -82,6 +100,7 @@ export default async function NewAssignmentPage() {
         <NewAssignmentForm
           classes={classes.map((c) => ({ id: c.id, name: c.name }))}
           subjects={subjects}
+          teachable={teachable}
           lessons={linkable}
           defaultTerm={settings.term}
           defaultSession={settings.session}

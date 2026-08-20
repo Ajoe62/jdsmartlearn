@@ -286,6 +286,41 @@ in the same subject, JDSmartLearn recalculates the CA, and the fold runs again.
 JDSmartLearn already holds itself to this on its own side: `jdCaScores` uses a
 deterministic id and `set` with merge, for exactly this reason.
 
+## Considered and rejected: a subject condition on `lessons` and `assignments`
+
+ResultPeak now allocates tutors by `(classId, subjectId)` pair rather than by
+class alone, and JDSmartLearn enforces that in its route handlers. The obvious
+follow-up is to mirror the subject check in the rules above. **It was considered
+and deliberately not written. Do not add it later without reading this.**
+
+Three reasons, in order of weight:
+
+1. **It cannot affect writes.** Every JDSmartLearn collection in this file is
+   `allow write: if false` — Admin SDK only. There is no client write path for a
+   subject condition to narrow.
+
+2. **It would not narrow reads either.** The tutor read branches on `lessons`,
+   `assignments` and `submissions` are already
+   `resource.data.get('tutorId', '') == request.auth.uid`. Ownership is
+   *strictly narrower* than `(class, subject)`: a tutor who passes it wrote the
+   document, so they necessarily pass any subject check that would follow.
+
+3. **It would cost a read per document evaluated, and could lock people out.**
+   The allocation lives on `schools/{schoolId}/tutors/{uid}`, not on the lesson,
+   so the rule would need a `get()` on that profile for every document it
+   evaluates — billed against the Spark quota this project shares with a live
+   paying school. And the allocation is optional: a tutor with no `assignments`
+   yet means "every subject", which a rule would have to express as "the profile
+   is missing the field, or the field is empty, or the map contains this pair" —
+   a fail-open condition written three ways in a language where a missing field
+   is an error, and an erroring rule denies. That is the shape of the 2026-08-12
+   incident described at the top of this file.
+
+The subject check therefore lives only where it can be written safely and read
+plainly: `assertSubjectAccess()` and `assertDocumentSubjectAccess()` in
+`src/lib/auth/tutor.ts`, over the pure predicate in
+`src/lib/auth/subject-access.ts`. Nothing in this file changes for that feature.
+
 ## Separately: two ResultPeak fixes this product depends on
 
 1. **`students` public read.** Any doc with `isActive == true` is currently

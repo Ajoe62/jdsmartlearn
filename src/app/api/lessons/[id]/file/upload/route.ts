@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { extname } from "node:path";
-import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
+import {
+  getTutorSession,
+  assertClassAccess,
+  assertDocumentSubjectAccess,
+} from "@/lib/auth/tutor";
 import { getLesson, setLessonFile, writeAuditLog } from "@/lib/db/lessons";
 import { studentLessonsTag, lessonViewTag } from "@/lib/db/student-content";
 import { deleteFile, putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
@@ -26,8 +30,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
   try {
     assertClassAccess(session, lesson.classId);
+    assertDocumentSubjectAccess(session, lesson);
   } catch {
-    return NextResponse.json({ error: "You don't teach that class." }, { status: 403 });
+    return NextResponse.json(
+      { error: "You don't teach that subject to that class." },
+      { status: 403 }
+    );
   }
 
   if (!storageConfigured()) {
