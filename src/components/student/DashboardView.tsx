@@ -1,65 +1,54 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Badge from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { CardLink } from "@/components/ui/Card";
-import EmptyState from "@/components/ui/EmptyState";
 import PageHeader, { NavPill, NavPills } from "@/components/ui/PageHeader";
 import { STORE, getAll, getMeta } from "@/lib/offline/db";
-import type { StoredLesson, StoredMaterial } from "@/lib/offline/db";
-import { groupBySubject, type DashboardLesson } from "@/lib/offline/merge";
+import type { StoredMaterial } from "@/lib/offline/db";
 import { onSyncProgress, saveAllMaterials } from "@/lib/offline/sync";
 
 /**
- * The student dashboard, rendered by BOTH paths:
+ * The student dashboard shell, rendered by BOTH paths:
  *
- *  - online first visit: the server passes `initial` from the cached class bundle
- *  - offline / repeat:    `initial` is null and this reads IndexedDB
+ *  - online first visit: the server passes the shelf and the announcements in
+ *  - offline / repeat:    the SW serves this page and each slot reads IndexedDB
  *
- * One component, so the two paths cannot drift. Nothing here can hold a marking
- * guide - the shape has no field for one.
+ * WHAT THIS COMPONENT NOW OWNS is only the chrome: the title, the tabs, the
+ * "saved on your phone" line and the save-for-offline button. The subject shelf
+ * and the announcements are passed in as slots and read their own data.
+ *
+ * It used to own the lesson list too, grouped by subject. That list moved to
+ * `/student/subjects/[subjectId]`, because a child taking nine subjects had to
+ * scroll past every lesson in all of them to reach the one they wanted, and
+ * because a flat list has nowhere to put a mark, a scheme of work, or a term.
  */
 export default function DashboardView({
-  initial,
+  announcements,
+  shelf,
 }: {
-  initial: DashboardLesson[] | null;
+  announcements?: React.ReactNode;
+  shelf?: React.ReactNode;
 }) {
-  const [lessons, setLessons] = useState<DashboardLesson[] | null>(initial);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [downloadable, setDownloadable] = useState(0);
   const [saving, setSaving] = useState<{ done: number; total: number } | null>(null);
 
-  // Re-read the device store after every sync, and on mount when the server gave
-  // us nothing (the offline shell).
   useEffect(() => {
     let alive = true;
 
     const load = async () => {
       try {
-        const [rows, materials, meta] = await Promise.all([
-          getAll<StoredLesson>(STORE.lessons),
+        const [lessons, materials, meta] = await Promise.all([
+          getAll<{ lessonId: string; hasMaterial: boolean }>(STORE.lessons),
           getAll<StoredMaterial>(STORE.materials),
           getMeta(),
         ]);
         if (!alive) return;
-        setSavedIds(new Set(materials.map((m) => m.lessonId)));
+        const have = new Set(materials.map((m) => m.lessonId));
         setSavedAt(meta?.lastSyncAt ?? null);
-        // Only replace server-rendered content once the device actually has some.
-        if (rows.length > 0) {
-          setLessons(
-            rows.map((r) => ({
-              lessonId: r.lessonId,
-              title: r.title,
-              subjectId: r.subjectId,
-              subjectName: r.subjectName,
-              hasMaterial: r.hasMaterial,
-              hasStudyGuide: r.hasStudyGuide,
-            }))
-          );
-        }
+        setDownloadable(lessons.filter((l) => l.hasMaterial && !have.has(l.lessonId)).length);
       } catch {
-        // No device store (private mode, old browser). The server copy stands.
+        // No device store (private mode, old browser). The page still works.
       }
     };
 
@@ -73,17 +62,16 @@ export default function DashboardView({
     };
   }, []);
 
-  const groups = groupBySubject(lessons ?? []);
-  const downloadable = (lessons ?? []).filter(
-    (l) => l.hasMaterial && !savedIds.has(l.lessonId)
-  ).length;
-
   async function saveAll() {
     setSaving({ done: 0, total: downloadable });
     await saveAllMaterials((done, total) => setSaving({ done, total }));
     setSaving(null);
     const materials = await getAll<StoredMaterial>(STORE.materials).catch(() => []);
-    setSavedIds(new Set(materials.map((m) => m.lessonId)));
+    const lessons = await getAll<{ lessonId: string; hasMaterial: boolean }>(
+      STORE.lessons
+    ).catch(() => []);
+    const have = new Set(materials.map((m) => m.lessonId));
+    setDownloadable(lessons.filter((l) => l.hasMaterial && !have.has(l.lessonId)).length);
   }
 
   return (
@@ -92,14 +80,21 @@ export default function DashboardView({
 
       <NavPills>
         <NavPill href="/student" active>
-          Lessons
+          Subjects
         </NavPill>
         <NavPill href="/student/assignments">Your work</NavPill>
         <NavPill href="/student/progress">Your progress</NavPill>
       </NavPills>
 
+      {/* Above everything else on purpose. A notice that the school closes early
+          today is worth more than a subject list, and it is the one thing on this
+          screen a child did not come looking for. */}
+      {announcements}
+
+      {shelf}
+
       {savedAt && (
-        <p className="mt-4 flex items-center gap-1.5 text-xs text-muted">
+        <p className="mt-8 flex items-center gap-1.5 text-xs text-muted">
           <svg className="h-3.5 w-3.5 text-successText" viewBox="0 0 20 20" fill="none" aria-hidden>
             <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5" />
             <path
@@ -118,61 +113,13 @@ export default function DashboardView({
         <Button
           onClick={() => void saveAll()}
           disabled={!!saving}
-          className="mt-4 w-full sm:w-auto"
+          variant="secondary"
+          className="mt-3 w-full sm:w-auto"
         >
           {saving
             ? `Saving lesson material… ${saving.done} of ${saving.total}`
             : `Save ${downloadable} lesson${downloadable === 1 ? "" : "s"} for offline`}
         </Button>
-      )}
-
-      {groups.length === 0 ? (
-        <div className="mt-6">
-          <EmptyState title="No lessons yet">
-            Your teacher will publish lessons here soon. Check back after your next class.
-          </EmptyState>
-        </div>
-      ) : (
-        <div className="mt-8 space-y-8">
-          {groups.map((group) => (
-            <section key={group.subjectId}>
-              <h2 className="text-eyebrow font-semibold uppercase text-muted">
-                {group.subjectName}
-              </h2>
-              <ul className="mt-2.5 space-y-2.5">
-                {group.lessons.map((lesson) => (
-                  <li key={lesson.lessonId}>
-                    <CardLink href={`/student/lessons/${lesson.lessonId}`} className="group">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate font-display font-semibold">{lesson.title}</p>
-                          <div className="mt-1.5 flex flex-wrap gap-1.5">
-                            {lesson.hasStudyGuide && <Badge tone="info">Study guide</Badge>}
-                            {lesson.hasMaterial && <Badge tone="neutral">Material</Badge>}
-                          </div>
-                        </div>
-                        <svg
-                          className="h-4 w-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          aria-hidden
-                        >
-                          <path
-                            d="m6 3.5 4.5 4.5L6 12.5"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </div>
-                    </CardLink>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
       )}
     </main>
   );

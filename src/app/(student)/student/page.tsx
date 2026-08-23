@@ -1,45 +1,64 @@
 import { redirect } from "next/navigation";
 import { getStudentSession } from "@/lib/auth/student";
-import { getClassSyncIndex } from "@/lib/db/student-content";
+import { getNoticesForClass } from "@/lib/db/announcements";
+import { getReadState } from "@/lib/db/read-state";
+import { getSubjectShelf } from "@/lib/db/subject-shelf";
+import { toNoticeItem, visibleToStudent } from "@/lib/announcements/notices";
+import Announcements from "@/components/student/Announcements";
 import DashboardView from "@/components/student/DashboardView";
+import SubjectShelfView from "@/components/student/SubjectShelfView";
 import { resultPeakUrl } from "@/lib/partner-links";
 
 /**
  * Student portal - read only. Server-rendered on the first visit (a cheap phone
  * gets content before any JS runs); afterwards the service worker serves the
- * shell and DashboardView renders the same data from IndexedDB.
+ * shell and each slot renders the same data from IndexedDB.
  *
- * Reads the same cached class bundle the sync routes use, so the dashboard costs
- * no Firestore reads of its own. NEVER returns marking guide content - the index
- * is built from the safe projection in toStudentPayload.
+ * READS. The shelf and the announcements come from bundles cached per class and
+ * shared by every student in it. Only two reads here are per-student and cannot
+ * be shared: this child's own submissions (inside the shelf) and their own
+ * announcement read state. Both buy something a child would notice.
+ *
+ * NEVER returns marking guide content. The shelf counts lessons through the safe
+ * projection, announcements go through toNoticeItem, and neither shape has a
+ * field a guide could occupy.
  */
 export default async function StudentHome() {
   const session = await getStudentSession();
   if (!session) redirect("/student/sign-in");
 
-  const index = await getClassSyncIndex(session.schoolId, session.classId);
+  const [shelf, noticeCandidates, readState] = await Promise.all([
+    getSubjectShelf(session.schoolId, session.classId, session.studentId),
+    getNoticesForClass(session.schoolId, session.classId),
+    getReadState(session.schoolId, session.studentId),
+  ]);
+
+  const notices = visibleToStudent(noticeCandidates, session.classId, Date.now()).map(
+    toNoticeItem
+  );
 
   // The portal chooser, NOT /s/{slug}. The deep link would need the school's
-  // slug, the session carries only its id, and looking one up would put a
+  // slug, the session carries only its id, and looking one up would put another
   // Firestore read on every dashboard load of every student to save one tap.
-  // This page is documented above as costing no reads of its own; keep it that
-  // way. See src/lib/partner-links.ts.
+  // See src/lib/partner-links.ts.
   const examsUrl = resultPeakUrl("/start");
 
   return (
     <>
       <DashboardView
-        initial={index.map((l) => ({
-          lessonId: l.lessonId,
-          title: l.title,
-          subjectId: l.subjectId,
-          subjectName: l.subjectName,
-          hasMaterial: l.hasMaterial,
-          hasStudyGuide: l.hasStudyGuide,
-        }))}
+        announcements={<Announcements initial={notices} initialReadState={readState} />}
+        shelf={
+          <SubjectShelfView
+            initial={shelf.subjects}
+            initialTotals={shelf.totals}
+            initialTerms={shelf.terms}
+            subjectsIncomplete={shelf.subjectsIncomplete}
+            hasUndated={shelf.hasUndated}
+          />
+        }
       />
       {examsUrl && (
-        <p className="mx-auto max-w-readable px-5 pb-10 text-sm text-muted">
+        <p className="mx-auto max-w-app px-5 pb-10 text-sm text-muted">
           <a
             className="underline"
             href={examsUrl}

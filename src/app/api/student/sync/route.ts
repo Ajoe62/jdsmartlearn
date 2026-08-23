@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getStudentSession } from "@/lib/auth/student";
 import { getClassSyncIndex } from "@/lib/db/student-content";
+import { getNoticesForClass } from "@/lib/db/announcements";
+import { getReadState } from "@/lib/db/read-state";
+import { toNoticeItem, visibleToStudent } from "@/lib/announcements/notices";
+import { listPublishedSchemesForClass, toSchemeSummary } from "@/lib/db/schemes";
 
 /**
  * How long a device may keep reading saved lessons after this sync. Read here,
@@ -17,13 +21,28 @@ function offlineGraceDays(): number {
 
 /**
  * The sync index: every lesson this student's class may read, without the
- * study-guide bodies. ~150 bytes per lesson, so ~30 KB at the 200-lesson cap -
- * one small response that completes on a bad link.
+ * study-guide bodies, plus the announcements addressed to them.
  *
- * Costs no Firestore reads of its own: it slices getClassSyncBundle, which is
- * cached per class. Thirty students syncing at 8am share ONE query.
+ * ~150 bytes per lesson, so ~30 KB at the 200-lesson cap - one small response
+ * that completes on a bad link.
  *
- * ETag'd, so the common case (nothing published since yesterday) is a 304.
+ * ANNOUNCEMENTS RIDE THIS RESPONSE RATHER THAN GETTING AN ENDPOINT OF THEIR OWN.
+ * That is the whole delivery mechanism: the student app already syncs on app
+ * open, on reconnect, on an explicit button and on a one-shot Background Sync
+ * tag, and adding a second thing to fetch on those triggers costs one array in a
+ * response that is already being made. A notices endpoint would be polled, and
+ * polling is forbidden (CLAUDE.md, Quota rules and Announcement rules).
+ *
+ * COST. The lesson index and the notice bundles are all `unstable_cache`d per
+ * class, so a class of thirty shares them. The ONE uncached Firestore read here
+ * is `getReadState` - it is per reader by definition, and caching it would
+ * either bleed one child's dismissals into another's screen or make a dismissal
+ * take a revalidate window to stick. One document read per sync per student is
+ * the price of a notice that stays read across a re-sign-in on a shared phone,
+ * and that is the behaviour worth paying for.
+ *
+ * ETag'd, so the common case (nothing published or posted since yesterday, and
+ * nothing newly dismissed) is a 304.
  */
 export async function GET(req: Request) {
   const session = await getStudentSession();
@@ -31,13 +50,36 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
   }
 
-  const lessons = await getClassSyncIndex(session.schoolId, session.classId);
+  const [lessons, noticeCandidates, readState, schemes] = await Promise.all([
+    getClassSyncIndex(session.schoolId, session.classId),
+    getNoticesForClass(session.schoolId, session.classId),
+    getReadState(session.schoolId, session.studentId),
+    listPublishedSchemesForClass(session.schoolId, session.classId),
+  ]);
+
+  // The date window and the reach test are applied here, in memory, over the
+  // cached candidate set - see isLive() for why they cannot be query filters.
+  const visible = visibleToStudent(noticeCandidates, session.classId, Date.now());
 
   const body = {
     studentId: session.studentId,
     classId: session.classId,
     graceDays: offlineGraceDays(),
     lessons,
+    // The safe projection. Structurally cannot carry an author uid or a schoolId.
+    announcements: visible.map(toNoticeItem),
+    /**
+     * Scheme-of-work SUMMARIES, so the subject shelf can count them offline.
+     * Bodies are fetched per scheme when a child opens one - a dozen full
+     * curriculum documents would not fit in one response on a 3G link.
+     */
+    schemes: schemes.map(toSchemeSummary),
+    /**
+     * Sent so the device can compute "unread" itself and render the badge with
+     * no network. The device never DECIDES read state - it posts dismissals to
+     * /api/student/announcements/read and takes back whatever the server says.
+     */
+    readState,
   };
 
   // Hash the payload, not the request - the device only needs to know whether

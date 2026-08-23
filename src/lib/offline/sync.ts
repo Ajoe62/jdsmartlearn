@@ -15,6 +15,7 @@
 import type { SyncIndexEntry } from "@/types";
 import {
   STORE,
+  clear,
   delMany,
   getAll,
   getMeta,
@@ -24,8 +25,12 @@ import {
   wipeContent,
   type StoredLesson,
   type StoredMaterial,
+  type StoredScheme,
 } from "./db";
 import { batched, evictionPlan, planSync, type LocalLessonState } from "./merge";
+import { saveAnnouncements } from "./announcements";
+import type { NoticeItem, ReadState } from "@/lib/announcements/notices";
+import type { StudentSchemeSummary } from "@/types/schemes";
 import {
   MATERIAL_CAP_BYTES,
   MAX_GUIDE_IDS as GUIDE_BATCH,
@@ -175,6 +180,11 @@ async function runSync({ force }: { force?: boolean }): Promise<SyncResult> {
       classId: string;
       graceDays: number;
       lessons: SyncIndexEntry[];
+      /** Absent when talking to a server that predates announcements. */
+      announcements?: NoticeItem[];
+      readState?: ReadState;
+      /** Absent when talking to a server that predates schemes of work. */
+      schemes?: StudentSchemeSummary[];
     };
     graceDaysFromServer = body.graceDays;
 
@@ -263,7 +273,39 @@ async function runSync({ force }: { force?: boolean }): Promise<SyncResult> {
       lastSyncAt: Date.now(),
       offlineGraceUntil: graceUntil(),
       etag,
+      readState: body.readState,
     });
+
+    /**
+     * Announcements, written AFTER the meta row on purpose.
+     *
+     * saveAnnouncements() folds the read state into the existing meta, so it
+     * needs one to exist. Doing it in this order also means an interrupted sync
+     * leaves lessons and meta consistent and only announcements missing, which
+     * the next sync repairs - rather than a read state pointing at notices the
+     * device never received.
+     *
+     * Guarded on the field being present so an older server (or a cached
+     * response from one) leaves the device's existing announcements alone
+     * instead of clearing them.
+     */
+    if (body.announcements) {
+      await saveAnnouncements(body.announcements, body.readState ?? { seenAt: 0, readIds: [] });
+    }
+
+    /**
+     * Schemes, replaced rather than merged - a withdrawn scheme must leave the
+     * phone on the next sync, the same rule the lesson plan follows. Guarded on
+     * the field being present so an older server leaves what is there alone
+     * instead of clearing it.
+     */
+    if (body.schemes) {
+      await clear(STORE.schemes).catch(() => {});
+      await putMany(
+        STORE.schemes,
+        body.schemes.map((s): StoredScheme => ({ ...s, savedAt: Date.now() }))
+      ).catch(() => {});
+    }
 
     void requestPersistence();
 

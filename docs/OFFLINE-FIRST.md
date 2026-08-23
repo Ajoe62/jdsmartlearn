@@ -595,3 +595,175 @@ and the marking-guide rule wins.
 announce itself to a class, and a due date set offline on Monday may already have
 passed when it uploads on Thursday. Setting work is a scheduled act; writing a
 lesson is not.
+
+## 13. Phase 6: Announcements (added 2026-08-22)
+
+School announcements — resumption dates, exam timetables, changes to activities
+— reach a student's dashboard and stay there until the child dismisses them.
+They add **no new mechanism** and, importantly, **no new fetch**.
+
+### Student
+
+| Store | Holds | Wiped by |
+|---|---|---|
+| `announcements` | live notices for this class, as `NoticeItem` | `destroy()`, `wipeContent()` |
+| `noticeReads` | dismissals waiting for a network | `destroy()`, `wipeContent()` |
+
+Database version 4. Both stores were added to `wipeContent()` as well as being
+covered by `destroy()`, and each needed its own reason:
+
+- **`announcements`** holds no personal data, but a class notice belongs to the
+  class the previous student was in. Leaving one on a shared phone would show
+  the next child a message that was never theirs.
+- **`noticeReads`** must never outlive its reader. Replaying one student's
+  dismissals under the next student's session would mark *their* notices read.
+
+### Delivery: no endpoint of its own
+
+Announcements ride the **existing** `/api/student/sync` response. That is the
+whole delivery design, and it is a quota decision as much as a product one: the
+student app already syncs on app open, on reconnect, on an explicit button and
+on the one-shot Background Sync tag, so adding an array to a response that is
+already being made costs nothing. A notices endpoint would be *polled*, and
+polling is forbidden ([CLAUDE.md](../CLAUDE.md), Quota rules).
+
+`"Urgent"` is a **tone, not a delivery mechanism**. An urgent notice renders
+louder and sorts first. It does not arrive one second sooner, and the field must
+never be turned into something that does.
+
+### Cost, stated plainly
+
+The notice bundles are `unstable_cache`d per school and per class, so a class of
+thirty shares two Firestore queries between them — the same mechanism
+`getClassSyncBundle` uses, with a 60-second window rather than 300 because a
+notice about today's closing time is exactly the thing a school will complain
+took too long to appear.
+
+**One uncached read was added**: `getReadState`, one document per sync per
+student. It is per-reader by definition, and caching it would either bleed one
+child's dismissals into another's screen or make a dismissal take a revalidate
+window to stick. What it buys is that a child who read the resumption notice on
+the family phone yesterday does not meet it again after re-signing in today —
+which a device-only read state could not deliver, because signing in as a
+different student wipes the store.
+
+### Read state: one document per reader, never one per notice
+
+`jdReadState/{schoolId}_{readerId}` holds a `seenAt` high-water mark and a
+capped list of individually dismissed ids. The obvious
+`{noticeId}_{studentId}` shape grows as notices × students without bound.
+
+**`seenAt` is not "when the student last looked",** and making it that would
+delete the entire feature: opening the dashboard would mark everything read the
+instant it was displayed. The watermark only ever advances across an unbroken
+run of *actually dismissed* notices — see `compact()` in
+`src/lib/announcements/notices.ts`, which is pure and has nine tests covering
+exactly this.
+
+### The queue
+
+Dismissals flush **between** read receipts and submissions. Both receipts and
+dismissals are droppable — a lost receipt costs a metric, a lost dismissal costs
+one extra tap — so they go first and cheaply, and a child's homework still
+flushes last so it cannot be starved behind them.
+
+Unlike the submission queue, **a terminal (4xx) dismissal failure is dropped
+silently**. That is the one place this queue differs from the contract in Phase
+5, and it is deliberate: interrupting a student to report that a "Got it" tap
+did not save would be worse than the notice reappearing once.
+
+### Tutors
+
+Tutors get the same notices on `/tutor` with no offline path at all. Tutor pages
+are network-only apart from `/tutor` and `/tutor/lessons/new`, so there is no
+device store to read and no queue to flush; a dismissal is one request, and a
+failed one leaves the card up — which is honest, since the card is what says the
+notice is unread.
+
+The cached `/tutor` page now carries announcements as well as class and topic
+names. The service worker comment names this. It does not widen the existing
+tradeoff, because an announcement carries no personal data by rule.
+
+## 14. Phase 7: The subject shelf and schemes of work (added 2026-08-22)
+
+The student dashboard stopped being a flat list of every lesson in every subject
+and became a **shelf**: one card per subject, filterable by term and session,
+with a scheme of work and this child's marks under each one.
+
+### Student
+
+| Store | Holds | Wiped by |
+|---|---|---|
+| `schemes` | published scheme-of-work SUMMARIES | `destroy()`, `wipeContent()` |
+
+Database version 5. Summaries only — a scheme document can be hundreds of KB and
+a class may have a dozen, so the body is fetched when a child opens one, exactly
+as lesson material is. A scheme has no marking guide and no field one could
+occupy, so it is the safest thing in the product to put on a phone.
+
+`lessons` and `assignments` gained `term` and `session` on the device. That is
+what makes the term switcher work **with no network**: the pair is stamped onto
+each row at creation and travels with it, so filtering is a local comparison
+rather than a query.
+
+### One shelf function, two callers
+
+`buildShelf()` in `src/lib/shelf/build.ts` is pure, has twelve tests, and is
+called by **both** the server render and the device render. That is the whole
+design. A shelf computed one way on the server and another way on the phone would
+eventually disagree about a child's marks and nobody would notice which was
+wrong; `src/lib/offline/shelf.ts` therefore only reshapes IndexedDB rows and does
+none of the counting itself.
+
+The offline shelf is knowingly **narrower** than the online one: the server also
+folds in tutor allocations, which the device has no copy of and must not — an
+allocation is authorization-adjacent and is read fresh per request (CLAUDE.md,
+Tutor offline). So a subject with an allocated tutor and nothing published shows
+online and not offline. That is the right way round: offline shows what this
+phone actually has.
+
+### Term and session: stamped, never resolved
+
+Both are copied byte for byte at creation and never resolved again. A lesson
+taught in first term still reports first term when a student filters in third.
+
+A row with **either half missing is undated** and matches only "All time". Half a
+pair is not a pair: `"Second Term"` alone spans every year the school has run,
+and ResultPeak's own session default is wrong for two thirds of the calendar
+(`docs/resultpeak-defects.md`, defect 1). Nothing is ever guessed from a
+timestamp, and the interface says "Earlier" rather than placing it in a guess.
+
+**An unset term does not block a lesson or a scheme**, unlike an assignment. An
+assignment's mark has to land in a specific term's continuous assessment, so
+`/api/tutor/assignments` answers 409 and refuses. A lesson carries no mark, and
+refusing to create one over a setting a school admin has not opened yet would
+break the core loop — the entire MVP — for a reason the teacher cannot fix.
+
+### Marks on the shelf
+
+Averages are computed from **finalised submissions only**, within one filter, and
+`null` when nothing has been released — never `0`, which is a mark a child can
+actually be given. Submissions are matched to a filter through the assignment
+they answer, since only the assignment carries a term.
+
+**There is no annual figure anywhere, and there must never be one.** That
+arithmetic is ResultPeak's (CLAUDE.md, Assessment rules). The "All time" filter
+is a lifetime mean of JDSmartLearn coursework, labelled as such, and it is not
+offered as an annual average.
+
+### The budget check that should have existed a month ago
+
+`npm run check:budget` (after `npm run build`) enforces the 30 KB gzipped rule
+that had been unenforced since the offline work shipped. It measures **app code
+only** — each student route's chunks minus the chunks shared with every route —
+because Next's "First Load JS" includes ~100 KB of React and Next runtime that no
+care in this repo can remove, and a check that can never pass gets deleted rather
+than fixed.
+
+A route listed in `STUDENT_ROUTES` that the build did not produce is a **failure,
+not a skip**: it means a page was renamed and the check quietly stopped measuring
+it.
+
+At the end of this phase every student route is inside budget, the largest being
+`/student/offline` at 18.1 KB — it carries every offline view, which is what an
+app shell is.

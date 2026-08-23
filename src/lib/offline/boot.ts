@@ -6,19 +6,21 @@
  *   2. wipe if the offline grace window has expired       (bounded offline life)
  *   3. re-authorize against Firestore, wipe if revoked    (revocation on reconnect)
  *   4. sync content, then assignments
- *   5. flush queued read receipts, then queued submissions
+ *   5. flush queued read receipts, then notice dismissals, then submissions
  *
  * Steps 1-3 are the security ordering and must stay in that order: never sync
  * into a store that still belongs to someone else.
  *
- * Within step 5 the ORDER matters too. Submissions flush last because a receipt
- * is a soft metric that may be dropped, while a submission is a child's homework
- * and must not be starved by a queue of receipts failing ahead of it.
+ * Within step 5 the ORDER matters too. Submissions flush LAST because a child's
+ * homework must not be starved by queues of softer writes failing ahead of it.
+ * Receipts and dismissals are both droppable - a lost receipt costs a metric, a
+ * lost dismissal costs one extra tap - so they go first and cheaply.
  */
 
 import { wipeContent } from "./db";
 import { ensureOwner, enforceGrace, sync, SYNC_STALE_MS, syncState } from "./sync";
 import { flush } from "./outbox";
+import { flushReads } from "./announcements";
 import { resetAssignmentSync, syncAssignments } from "./assignments-sync";
 import { flushSubmissions } from "./submissions";
 
@@ -85,7 +87,9 @@ export async function boot(studentId: string): Promise<BootResult> {
     }
     await sync();
     await syncAssignments();
-    void flush().then(() => flushSubmissions());
+    void flush()
+      .then(() => flushReads())
+      .then(() => flushSubmissions());
   }
 
   booted = true;
@@ -99,7 +103,9 @@ export async function refreshIfStale(): Promise<void> {
   if (lastSyncAt && Date.now() - lastSyncAt < SYNC_STALE_MS) return;
   await sync();
   await syncAssignments();
-  void flush().then(() => flushSubmissions());
+  void flush()
+    .then(() => flushReads())
+    .then(() => flushSubmissions());
 }
 
 /**
@@ -116,7 +122,9 @@ export function watchConnection(): () => void {
       if (!ok) return;
       await sync();
       await syncAssignments();
-      void flush().then(() => flushSubmissions());
+      void flush()
+        .then(() => flushReads())
+        .then(() => flushSubmissions());
     })();
   };
 

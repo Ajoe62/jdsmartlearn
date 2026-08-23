@@ -200,6 +200,76 @@ A flat `submissions/{assignmentId}_{studentId}` avoids all of it, matches the
 duplicate-submission check one `get()` instead of a query. **Do not move
 submissions under assignments.**
 
+## The announcement and subject-shelf queries hold the line too
+
+Added 2026-08-22. Every query is equality-only, `.limit()`ed and sorted in
+memory, so **nothing here needs a composite index either**.
+
+| Where | Query | Sort |
+|---|---|---|
+| Student announcements, school-wide | `jdNotifications` where `schoolId`, `audience == "school"` | `createdAt` in memory |
+| Student announcements, own class | `jdNotifications` where `schoolId`, `audience == "class"`, `targetId == classId` | merged with the above, `createdAt` in memory |
+| Tutor announcements | `jdNotifications` where `schoolId`, `audience == "tutor"`, `targetId == uid` | `createdAt` in memory |
+| Tutor composer, own posts | `jdNotifications` where `schoolId`, `createdBy == uid` | `createdAt` in memory |
+| Read state | `jdReadState` doc `get()` at `${schoolId}_${readerId}` | none |
+| Class subjects | `schools/{id}/tutors`, one scan per school, cached 10 min | derived in memory |
+| Schemes for a class | `schemes` where `schoolId`, `classId` | subject name in memory |
+| Schemes a tutor owns | `schemes` where `schoolId`, `tutorId` | `updatedAt` in memory |
+| Schemes across a tutor's classes | `schemes` where `schoolId` | class filtered in memory |
+
+### The two shapes that were rejected, and why
+
+Both are the obvious way to write this, and both cost a cross-repo index PR
+against a live paying school's project.
+
+**1. `array-contains` on an audience key.** The tidy design gives each
+announcement `audienceKeys: ["school:SCH1", "class:CLS9"]` and asks one query
+for it:
+
+```
+where('schoolId', '==', schoolId).where('audienceKeys', 'array-contains', key)
+```
+
+One query instead of two, and it reads well. But `array-contains` combined with
+an equality filter on a **different** field needs a composite index —
+Firestore's automatic single-field index for an array field has
+`arrayConfig: CONTAINS` and covers the array filter alone, not the pair. It
+would need appending to ResultPeak's `firestore.indexes.json` and deploying from
+there before a single child could see a notice.
+
+**Two equality-only queries merged in memory cost one extra read per class per
+revalidate window**, because both are sliced out of the same
+`unstable_cache`d bundle. That is a rounding error against a cross-repo deploy.
+
+**1b. `where('classId', 'in', ids)` for the tutor's schemes screen.** An `in`
+filter caps at 30 values, so an admin at a school with more than thirty classes
+would silently see a partial list — the worst possible failure for a screen whose
+entire purpose is showing which subjects are MISSING a scheme of work. One
+equality filter on `schoolId` with the class set applied in memory has no cap and
+no index. See `listSchemesForSchoolClasses`.
+
+**2. A date range for scheduling.** `startsAt <= now` and `expiresAt > now` are
+range filters on two different fields, which Firestore refuses outright
+(a query may range-filter on one field only) and which would need an index even
+split apart. The date window is therefore applied **in memory**, inside the
+cached bundle, over a `.limit()`ed equality-only result. An announcement set is
+tens of documents per school, not thousands, so the filter is free and the
+scheduling behaviour is exactly as intended.
+
+Keep both of these written down. They are the two changes a future reader is
+most likely to make "to tidy the query up", and either one turns a same-repo
+change into a deploy against a live school.
+
+### Not verified against production
+
+Unlike the assessment tables above, these shapes have **not** been probed
+read-only against the real project — they are reasoned from the rule stated at
+the top of this file (equality-only filters, any number of them, need no
+composite index). That rule has held for every JD query so far and both
+rejected shapes above are documented failures of it, not of the reasoning. Probe
+them the same way before the first pilot if you want the same confidence the
+assessment rows have.
+
 ## Note: existing manually-created indexes are now unused
 
 The `lessons (schoolId, tutorId, updatedAt)` and

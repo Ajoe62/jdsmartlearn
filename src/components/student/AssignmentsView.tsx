@@ -65,6 +65,8 @@ export default function AssignmentsView({
                 type: a.type as AssignmentListItem["type"],
                 dueDate: a.dueDate,
                 maxMarks: a.maxMarks,
+                term: a.term ?? null,
+                session: a.session ?? null,
                 status,
                 submittedAt: sub?.submittedAt ?? null,
                 finalScore,

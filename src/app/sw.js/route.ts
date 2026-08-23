@@ -134,11 +134,19 @@ self.addEventListener("fetch", (event) => {
      * class list, and there is no data-free shell to fall back on.
      *
      * The tradeoff, deliberately taken: these cached pages carry the tutor's class
-     * and topic names, so a shared phone could show them to the next person before
-     * they sign in. That is class metadata, not student data and not a marking
-     * guide, and it is wiped on sign-out and on tutor change. Every OTHER /tutor
-     * page falls through to network-only below - /tutor/lessons/{id} renders the
-     * marking guide and must never be stored.
+     * and topic names, and since 2026-08-22 the dashboard also carries any
+     * announcement addressed to them - including a staff-only one. So a shared
+     * phone could show all of that to the next person before they sign in. It is
+     * still class metadata and school notices, not student data and not a marking
+     * guide, and it is wiped on sign-out and on tutor change. An announcement
+     * carries no personal data by rule (CLAUDE.md, Announcement rules), which is
+     * what keeps this tradeoff the same size as it was.
+     *
+     * Every OTHER /tutor page falls through to network-only below -
+     * /tutor/lessons/{id} renders the marking guide and /tutor/sign-ins renders
+     * live access codes, and neither must ever be stored. /tutor/announcements is
+     * network-only too: it lists notices the tutor sent, which is a composing
+     * surface rather than something they need on a dead link.
      */
     if (url.pathname === "/tutor" || url.pathname === "/tutor/lessons/new") {
       event.respondWith(networkThenCache(request, SHELL));

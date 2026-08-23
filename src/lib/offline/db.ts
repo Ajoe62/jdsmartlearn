@@ -9,12 +9,17 @@
  * CLAUDE.md, Offline rules).
  */
 
+import type { NoticeItem, ReadState } from "@/lib/announcements/notices";
+import type { StudentSchemeSummary } from "@/types/schemes";
+
 export const DB_NAME = "jdsmartlearn";
 /**
  * v2 added the `files` store (saved original files).
  * v3 added `assignments`, `submissions` and `drafts` for assessment.
+ * v4 added `announcements` and `noticeReads` for school announcements.
+ * v5 added `schemes` (scheme-of-work summaries) for the subject shelf.
  */
-export const DB_VERSION = 3;
+export const DB_VERSION = 5;
 
 export const STORE = {
   meta: "meta",
@@ -34,6 +39,33 @@ export const STORE = {
    * is a child's work that may not.
    */
   submissionOutbox: "submissionOutbox",
+  /**
+   * School announcements, keyed by notice id.
+   *
+   * Safe here by construction: the shape is the server's `NoticeItem`
+   * projection, which has no field an author uid, a schoolId or a marking guide
+   * could occupy. Announcements carry no personal data at all - that is a rule
+   * on the write side, not a hope about this one.
+   */
+  announcements: "announcements",
+  /**
+   * Dismissals waiting for a network, keyed by notice id.
+   *
+   * Its own store rather than a row in `outbox`, for the same reason
+   * `submissionOutbox` is: the two flush to different routes and deserve
+   * different failure handling. Keying by notice id means dismissing the same
+   * notice twice replaces rather than duplicates.
+   */
+  noticeReads: "noticeReads",
+  /**
+   * Published scheme-of-work SUMMARIES, keyed by scheme id.
+   *
+   * Summaries only - no `text`, no `weeks`. A scheme document can be hundreds of
+   * KB and a class may have a dozen; the body is fetched when a child actually
+   * opens one, exactly as lesson material is. A scheme has no marking guide and
+   * no field one could occupy, so it is safe here by construction.
+   */
+  schemes: "schemes",
 } as const;
 
 export type StoreName = (typeof STORE)[keyof typeof STORE];
@@ -47,7 +79,44 @@ export type OfflineMeta = {
   offlineGraceUntil: number;
   /** ETag of the last index response, so an unchanged sync costs one 304. */
   etag: string | null;
+  /**
+   * The server's read state, mirrored so the unread badge renders with no
+   * network.
+   *
+   * A MIRROR, NOT THE TRUTH. The device applies a dismissal optimistically and
+   * then takes back whatever the server returns, so a child who read a notice on
+   * the family phone yesterday does not meet it again after re-signing in today
+   * - which is exactly what a device-only read state would do, given that
+   * signing in as a different student wipes the whole store.
+   *
+   * Optional: a store written by v3 has no such field.
+   */
+  readState?: ReadState;
 };
+
+/**
+ * One announcement as the device holds it.
+ *
+ * `NoticeItem` verbatim plus a save time. Not re-declared field by field,
+ * because the safety property lives on `NoticeItem` itself - it is the
+ * projection the server builds, and it has no field an author uid could occupy.
+ * Copying the field list here would create a second place for that to drift.
+ */
+export type StoredAnnouncement = NoticeItem & { savedAt: number };
+
+/** A dismissal waiting for a network. */
+export type QueuedNoticeRead = {
+  id: string;
+  queuedAt: number;
+};
+
+/**
+ * A published scheme of work, as the shelf needs it.
+ *
+ * `StudentSchemeSummary` verbatim plus a save time - the projection the server
+ * builds, which has no field a tutor uid or an R2 object key could occupy.
+ */
+export type StoredScheme = StudentSchemeSummary & { savedAt: number };
 
 export type StoredLesson = {
   lessonId: string;
@@ -58,6 +127,9 @@ export type StoredLesson = {
   hasMaterial: boolean;
   hasStudyGuide: boolean;
   updatedAt: number;
+  /** Verbatim, so the shelf's term filter works offline. Null on older lessons. */
+  term: string | null;
+  session: string | null;
   studyGuide: { summary: string; questions: { number: number; question: string }[] } | null;
   file: { name: string; size: number; inline: boolean } | null;
   savedAt: number;
@@ -101,6 +173,9 @@ export type StoredAssignment = {
   type: string;
   dueDate: number;
   maxMarks: number;
+  /** Verbatim, so the shelf's term filter works offline. Null on older rows. */
+  term: string | null;
+  session: string | null;
   /** Instructions, saved when the student opens the assignment. */
   description: string | null;
   allowedFileTypes: string[];
@@ -209,6 +284,15 @@ function open(): Promise<IDBDatabase> {
         // rather than duplicates. One submission per assignment, on the device
         // as well as on the server.
         db.createObjectStore(STORE.submissionOutbox, { keyPath: "assignmentId" });
+      }
+      if (!db.objectStoreNames.contains(STORE.announcements)) {
+        db.createObjectStore(STORE.announcements, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE.noticeReads)) {
+        db.createObjectStore(STORE.noticeReads, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE.schemes)) {
+        db.createObjectStore(STORE.schemes, { keyPath: "schemeId" });
       }
     };
 
@@ -328,6 +412,15 @@ export async function wipeContent(): Promise<void> {
     clear(STORE.materials).catch(() => {}),
     clear(STORE.files).catch(() => {}),
     clear(STORE.outbox).catch(() => {}),
+    // Announcements go with the rest. They hold no personal data, but a class
+    // notice belongs to the class the previous student was in, and leaving one
+    // on the phone would show the next child a message that was never theirs.
+    clear(STORE.announcements).catch(() => {}),
+    // Unflushed dismissals die with the reader who made them. Replaying them
+    // under the next student's session would mark THEIR notices read.
+    clear(STORE.noticeReads).catch(() => {}),
+    // A scheme belongs to the class the previous student was in.
+    clear(STORE.schemes).catch(() => {}),
     clear(STORE.meta).catch(() => {}),
   ]);
 }

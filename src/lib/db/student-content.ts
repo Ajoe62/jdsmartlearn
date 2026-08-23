@@ -94,6 +94,8 @@ export function getClassSyncBundle(schoolId: string, classId: string) {
           // Only true when the guide is actually deliverable to a device.
           hasStudyGuide: l.hasStudyGuide && !!payload,
           updatedAt: l.updatedAt,
+          term: l.term,
+          session: l.session,
           studyGuide: payload
             ? { summary: payload.summary, questions: payload.questions }
             : null,

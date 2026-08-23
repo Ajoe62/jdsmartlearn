@@ -152,6 +152,8 @@ export function getClassAssignments(schoolId: string, classId: string) {
         type: a.type,
         dueDate: a.dueDate,
         maxMarks: a.maxMarks,
+        term: a.term,
+        session: a.session,
       }));
     },
     ["class-assignments", schoolId, classId],
@@ -190,6 +192,8 @@ export async function buildAssignmentList(
       type: a.type,
       dueDate: a.dueDate,
       maxMarks: a.maxMarks,
+      term: a.term,
+      session: a.session,
       status: sub?.status ?? null,
       submittedAt: sub?.submittedAt ?? null,
       finalScore,

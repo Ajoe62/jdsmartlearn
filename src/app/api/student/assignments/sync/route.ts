@@ -62,6 +62,8 @@ export async function GET(req: Request) {
         type: item.type,
         dueDate: item.dueDate,
         maxMarks: item.maxMarks,
+        term: item.term,
+        session: item.session,
         description: detail?.description ?? null,
         allowedFileTypes: detail?.allowedFileTypes ?? [],
       };
