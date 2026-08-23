@@ -62,6 +62,13 @@ export type VisibleLesson = {
   hasStudyGuide: boolean;
   /** Device staleness key - a changed value means "re-download this lesson". */
   updatedAt: number;
+  /**
+   * The academic term and session this lesson was taught in, verbatim. `null` on
+   * lessons created before the field existed - the shelf groups those under
+   * "Earlier" rather than guessing. See the note on Lesson.term.
+   */
+  term: string | null;
+  session: string | null;
   /** Denormalized study guide. Absent on lessons published before the backfill. */
   studentPayload?: StudentPayload;
   /** Original-file metadata, if one was uploaded. */
@@ -93,6 +100,8 @@ export async function listVisibleLessonsForClass(
       "publishedAt",
       "materialPublishedAt",
       "updatedAt",
+      "term",
+      "session",
       "studentPayload",
       "fileName",
       "fileSize",
@@ -109,6 +118,8 @@ export async function listVisibleLessonsForClass(
         publishedAt?: number;
         materialPublishedAt?: number;
         updatedAt?: number;
+        term?: string | null;
+        session?: string | null;
         studentPayload?: StudentPayload;
         fileName?: string;
         fileSize?: number;
@@ -121,6 +132,8 @@ export async function listVisibleLessonsForClass(
         hasMaterial: !!x.materialPublishedAt,
         hasStudyGuide: x.status === "published",
         updatedAt: x.updatedAt ?? 0,
+        term: x.term ?? null,
+        session: x.session ?? null,
         studentPayload: x.studentPayload,
         fileName: x.fileName,
         fileSize: x.fileSize,
@@ -138,6 +151,8 @@ export async function listVisibleLessonsForClass(
         hasMaterial: l.hasMaterial,
         hasStudyGuide: l.hasStudyGuide,
         updatedAt: l.updatedAt,
+        term: l.term,
+        session: l.session,
         studentPayload: l.studentPayload,
         fileName: l.fileName,
         fileSize: l.fileSize,

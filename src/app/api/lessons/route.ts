@@ -16,6 +16,7 @@ import {
   writeAuditLog,
 } from "@/lib/db/lessons";
 import { studentLessonsTag } from "@/lib/db/student-content";
+import { getCurrentTermSession } from "@/lib/db/school-settings";
 import { putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
 import type { ResultPeakClass, Topic } from "@/types";
 
@@ -121,6 +122,25 @@ export async function POST(req: Request) {
     );
   }
 
+  /**
+   * Stamp the term and session, ONCE, here.
+   *
+   * Copied byte for byte from the school's setting and never resolved again: the
+   * current term moves, but a lesson taught in first term must still report
+   * first term when a student filters their subject shelf in third.
+   *
+   * UNLIKE AN ASSIGNMENT, AN UNSET TERM IS NOT AN ERROR HERE, and the difference
+   * is deliberate. `/api/tutor/assignments` answers 409 and refuses, because an
+   * assignment's mark has to land in a specific term's continuous assessment and
+   * a mark filed under the wrong term is worse than no mark. A lesson carries no
+   * mark. Refusing to create one would break the core loop - the entire MVP -
+   * over a setting a school admin has not opened yet, so it stamps null and the
+   * lesson shows under "Earlier" until the shelf can place it.
+   *
+   * Never fall back to a guess from the clock. See the note on Lesson.term.
+   */
+  const settings = await getCurrentTermSession(session.schoolId);
+
   const lessonId = await createLesson({
     schoolId: session.schoolId,
     tutorId: session.uid,
@@ -130,6 +150,8 @@ export async function POST(req: Request) {
     subjectId,
     title,
     extractedText,
+    term: settings?.term ?? null,
+    session: settings?.session ?? null,
     status: "draft",
   });
 
