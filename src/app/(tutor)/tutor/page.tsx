@@ -5,6 +5,10 @@ import { CardLink } from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import PageHeader, { NavPill, NavPills } from "@/components/ui/PageHeader";
 import { getTutorSession } from "@/lib/auth/tutor";
+import { getNoticesForTutor } from "@/lib/db/announcements";
+import { getReadState } from "@/lib/db/read-state";
+import { toNoticeItem, visibleToTutor } from "@/lib/announcements/notices";
+import TutorNotices from "@/components/tutor/TutorNotices";
 import { listLessonsForTutor, listLessonsForSchool } from "@/lib/db/lessons";
 import { getClassesByIds, getTutorNames, listClassesForSchool } from "@/lib/db/resultpeak";
 import { resultPeakUrl } from "@/lib/partner-links";
@@ -19,7 +23,7 @@ export default async function TutorDashboard() {
   const session = await getTutorSession();
   if (!session) redirect("/tutor/sign-in");
 
-  const [classes, lessons, tutorNames] = await Promise.all([
+  const [classes, lessons, tutorNames, noticeCandidates, readState] = await Promise.all([
     session.isAdmin
       ? listClassesForSchool(session.schoolId)
       : getClassesByIds(session.assignedClasses),
@@ -27,7 +31,16 @@ export default async function TutorDashboard() {
       ? listLessonsForSchool(session.schoolId)
       : listLessonsForTutor(session.schoolId, session.uid),
     session.isAdmin ? getTutorNames(session.schoolId) : Promise.resolve(null),
+    getNoticesForTutor(session.schoolId, session.uid),
+    getReadState(session.schoolId, session.uid),
   ]);
+
+  const notices = visibleToTutor(
+    noticeCandidates,
+    session.uid,
+    session.assignedClasses,
+    Date.now()
+  ).map(toNoticeItem);
 
   // Where the marks a tutor enters here end up. "" when ResultPeak is not
   // configured, and then the pill below is not rendered. No school in the path:
@@ -63,6 +76,8 @@ export default async function TutorDashboard() {
             Lessons
           </NavPill>
           <NavPill href="/tutor/assignments">Assignments</NavPill>
+          <NavPill href="/tutor/schemes">Schemes of work</NavPill>
+          <NavPill href="/tutor/announcements">Announcements</NavPill>
           <NavPill href="/tutor/sign-ins">Student sign-ins</NavPill>
           {session.isAdmin && <NavPill href="/tutor/settings">Assessment settings</NavPill>}
           {resultsUrl && (
@@ -72,6 +87,10 @@ export default async function TutorDashboard() {
           )}
         </NavPills>
       )}
+
+      {/* Above the work queue: a notice from the school office is the one thing
+          on this page the teacher did not come looking for. */}
+      <TutorNotices initial={notices} initialReadState={readState} />
 
       {/* The one thing a teacher might not otherwise notice: study materials
           finished generating and are sitting unpublished. */}
