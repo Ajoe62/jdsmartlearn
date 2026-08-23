@@ -12,9 +12,60 @@ import type { ResultPeakClass, ResultPeakSchool, ResultPeakStudent } from "@/typ
  * with a live paying school. See CLAUDE.md.
  */
 
+/**
+ * DELIBERATELY NOT CACHED, and it must stay that way.
+ *
+ * The obvious optimisation - this document is read from a dozen places and
+ * changes about never - is wrong, because of ONE field on it. Three callers read
+ * `assessmentTypes` precisely because it can change under them: ResultPeak lets
+ * an admin drop an assessment type after scores exist, so a mapping that was
+ * valid last term can point at nothing today. `academic-records.ts` re-reads it
+ * before deciding whether a child's CA mark is written or skipped, `skips.ts`
+ * re-reads it to warn a tutor before a result sheet does, and the settings route
+ * re-reads it to validate what an admin just picked. All three say so in their
+ * own comments.
+ *
+ * A cache here would put a staleness window in front of a decision about a real
+ * child's marks, to save a read. If you need one slow-changing field off this
+ * document cheaply, cache THAT FIELD ALONE the way
+ * getSubjectAllocationEnforced() below does - never the document.
+ */
 export async function getSchool(schoolId: string): Promise<ResultPeakSchool | null> {
   const snap = await adminDb.doc(`${RP.schools}/${schoolId}`).get();
   return snap.exists ? (snap.data() as ResultPeakSchool) : null;
+}
+
+/**
+ * Whether this school enforces (classId, subjectId) tutor allocation.
+ *
+ * ABSENT MEANS OFF. Every school is here today, so this returns false
+ * everywhere until a school opts in.
+ *
+ * CACHED, unlike getSchool() above, and the difference is the point: only the
+ * boolean crosses the cache boundary, so nothing can later reach into a cached
+ * school object for `assessmentTypes` and pick up a stale mapping. It reads the
+ * document directly rather than calling getSchool() for the same reason - there
+ * is no cached ResultPeakSchool anywhere for a future caller to find.
+ *
+ * Called once per tutor request from getTutorSession(), so it has to be close to
+ * free; 60s makes it one read per school per minute however many tutors are
+ * working. The lag is asymmetric and that is deliberate. Switching enforcement
+ * ON applies up to a minute late, which is safe: tutors stay unrestricted a
+ * little longer. Switching it OFF also applies up to a minute late, which is the
+ * direction that hurts - a school that panic-disables it waits out the window
+ * with its tutors still locked out. A minute is short enough to sit through and
+ * long enough to be worth having; do not lengthen it without weighing that case.
+ */
+export function getSubjectAllocationEnforced(schoolId: string): Promise<boolean> {
+  return unstable_cache(
+    async () => {
+      const snap = await adminDb.doc(`${RP.schools}/${schoolId}`).get();
+      // Strict === true: absent, null and undefined all mean "not enforced".
+      return snap.get("subjectAllocation") === true;
+    },
+    ["subject-allocation", schoolId],
+    { revalidate: 60 }
+  )();
 }
 
 /** Canonical subject list - subject.id is the join key used by topics and exams. */

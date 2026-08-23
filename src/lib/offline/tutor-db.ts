@@ -10,10 +10,16 @@
  *  - expires with the 5-day tutor session, so an abandoned phone does not keep
  *    marking guides indefinitely.
  *
- * `assignedClasses` is deliberately NOT stored. It is read fresh from Firestore on
- * every request so a class revocation in ResultPeak applies instantly; caching it
- * here would lengthen that window. A queued op for a revoked class is meant to
- * fail on flush.
+ * NO AUTHORIZATION IS STORED HERE. `assignedClasses`, and equally
+ * `assignedSubjects`, `subjectClasses` and `classTeacherOf`, are read fresh from
+ * Firestore on every request so a revocation in ResultPeak applies instantly;
+ * caching any of them here would lengthen that window. A queued op for a class
+ * or subject the tutor no longer holds is meant to fail on flush.
+ *
+ * The school's `subjectAllocation` enforcement flag is not stored either. It is
+ * cached server-side for 60s (see `getSubjectAllocationEnforced`), which is a
+ * bound a school can wait out; a copy on a device would outlive the session that
+ * produced it.
  */
 
 import type { QueuedOp } from "./collapse";

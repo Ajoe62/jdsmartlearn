@@ -21,27 +21,42 @@ export interface SubjectAllocation {
   assignedSubjects: string[];
   /** subjectId -> classIds. */
   subjectClasses: Record<string, string[]>;
+  /**
+   * The SCHOOL's enforcement flag - `schools/{id}.subjectAllocation`, absent
+   * meaning off. Not a property of the tutor, which is why it is easy to get
+   * backwards. See the truth table above teachesSubjectInClass().
+   */
+  subjectAllocationEnforced: boolean;
 }
 
 /**
- * The legacy state: this tutor has not been allocated subjects yet, so every
- * check must pass. Most tutors are here, and will be for a while.
+ * This tutor has no usable allocation.
+ *
+ * WHAT THIS MEANS DEPENDS ENTIRELY ON THE SCHOOL FLAG, and this function
+ * deliberately does not know about the flag - it reports a fact about the tutor
+ * and lets the callers below decide what it costs. With enforcement off it means
+ * "unrestricted, as every tutor was before this feature"; with enforcement on it
+ * means "authors nothing until an admin allocates them".
  *
  * NOTE THE FIELDS THIS READS, because it is not the obvious way to write it.
  * ResultPeak's contract defines the legacy state as `assignments` being absent
  * or empty, and `assignments` is the authoritative field. This reads the DERIVED
  * fields instead - the same ones the checks below read.
  *
- * The two can disagree. A tutor whose `assignments` has been written but whose
- * `subjectClasses` has not yet been derived would, on the authoritative test,
- * count as allocated and then fail every lookup against an empty map - locking a
- * working account out of routes it can use today. Reading the fields the checks
- * actually use means a half-written profile falls back to current behaviour
- * instead.
+ * The two can disagree, in exactly one direction that matters: a tutor whose
+ * `assignments` has been written but whose `subjectClasses` has not yet been
+ * derived. On the authoritative test they count as allocated and then fail every
+ * lookup against an empty map. Reading the fields the checks actually use keeps
+ * that half-written profile in ONE state rather than two disagreeing ones.
  *
- * This fails OPEN, which is deliberate and bounded: assertClassAccess still runs
- * first at every call site, so the worst case is the class-only scoping that is
- * in production right now, never something wider.
+ * Under enforcement that state is a LOCKOUT, by an explicit decision: a
+ * half-written profile waits for ResultPeak's derive step to finish rather than
+ * falling back to permissive. That makes the derive step load-bearing. It is the
+ * right way round - a school that has switched enforcement on has said it wants
+ * pairs checked, and "we could not read your allocation" is not a reason to stop
+ * checking - but it means a stalled derive is a support call, not a silent
+ * widening. Nobody is in that state today; every allocated tutor in the project
+ * has both fields consistent with `assignments`.
  */
 export function isUnallocated(allocation: SubjectAllocation): boolean {
   return (
@@ -50,14 +65,52 @@ export function isUnallocated(allocation: SubjectAllocation): boolean {
   );
 }
 
-/** Whether this tutor teaches `subjectId` to `classId`. */
+/**
+ * A tutor who can author nothing until somebody allocates them.
+ *
+ * Only possible under enforcement. Worth its own name because the PICKERS need
+ * it: `teachableMap` returns `{}` for an unallocated tutor and every caller
+ * reads `{}` as "no restriction, offer everything", which is exactly wrong here
+ * - it would offer a full subject list to someone whose every submission is
+ * about to be refused. Pages test this first and render an empty state that
+ * names the fix (ask your admin) instead of a picker that cannot work.
+ */
+export function isAwaitingAllocation(allocation: SubjectAllocation): boolean {
+  if (allocation.isAdmin) return false;
+  return allocation.subjectAllocationEnforced && isUnallocated(allocation);
+}
+
+/**
+ * Whether this tutor teaches `subjectId` to `classId`.
+ *
+ * THERE ARE TWO SWITCHES HERE AND THEY ANSWER DIFFERENT QUESTIONS. The school
+ * flag decides whether subject checks apply at all; the tutor's own allocation
+ * decides what passes once they do. Collapsing them into one test gets two of
+ * the four rows wrong:
+ *
+ *   flag off + no allocation   -> allow    (every school today)
+ *   flag off + allocated       -> ALLOW    (pickers narrow; routes must not refuse)
+ *   flag on  + allocated       -> check the pair
+ *   flag on  + no allocation   -> REFUSE   (not "allow everything")
+ *
+ * Row 2 is why `subjectAllocationEnforced` is tested before `isUnallocated`:
+ * narrowing a picker is a convenience a school gets for free by allocating its
+ * tutors, and it must never turn into a refusal that nobody switched on. Row 4
+ * is the reason the flag exists at all - without it an unallocated tutor is
+ * indistinguishable from a school that predates the feature.
+ *
+ * Always call assertClassAccess first. This narrows that check, never replaces
+ * it, so the widest this can ever be is the class-only scoping already in
+ * production.
+ */
 export function teachesSubjectInClass(
   allocation: SubjectAllocation,
   classId: string,
   subjectId: string
 ): boolean {
   if (allocation.isAdmin) return true;
-  if (isUnallocated(allocation)) return true;
+  if (!allocation.subjectAllocationEnforced) return true;
+  if (isUnallocated(allocation)) return false;
   return (allocation.subjectClasses[subjectId] ?? []).includes(classId);
 }
 
@@ -67,13 +120,16 @@ export function teachesSubjectInClass(
  * For the one route that has no class to check against: POST /api/topics
  * creates a (subject, level, term) curriculum row, school-wide and shared by
  * every tutor, with no classId anywhere in the request.
+ *
+ * Same four rows as teachesSubjectInClass, against `assignedSubjects`.
  */
 export function teachesSubject(
   allocation: SubjectAllocation,
   subjectId: string
 ): boolean {
   if (allocation.isAdmin) return true;
-  if (isUnallocated(allocation)) return true;
+  if (!allocation.subjectAllocationEnforced) return true;
+  if (isUnallocated(allocation)) return false;
   return allocation.assignedSubjects.includes(subjectId);
 }
 
@@ -85,6 +141,19 @@ export function teachesSubject(
  * read as "no restriction, offer everything". Keeping that convention here
  * rather than in each form is what stops a picker inventing its own idea of the
  * legacy state.
+ *
+ * DELIBERATELY IGNORES `subjectAllocationEnforced`, and that asymmetry with the
+ * checks above is the intended behaviour, not an oversight. Narrowing a picker
+ * to the subjects a tutor actually teaches is a convenience that should apply as
+ * soon as ResultPeak has allocated them, whether or not their school has
+ * switched enforcement on - showing a teacher 36 subjects they do not teach is
+ * the complaint this feature exists to fix, and it does not become worth fixing
+ * only when a flag flips.
+ *
+ * The one case it cannot express is enforcement + no allocation, where `{}`
+ * would offer everything to someone who may author nothing. Callers test
+ * isAwaitingAllocation() BEFORE reaching for this map, and render an empty state
+ * instead of a picker.
  */
 export function teachableMap(
   allocation: SubjectAllocation,

@@ -7,9 +7,11 @@ import {
   getTeachableMap,
   listClassesForSchool,
 } from "@/lib/db/resultpeak";
+import { isAwaitingAllocation } from "@/lib/auth/subject-access";
 import { listLessonsForSchool, listLessonsForTutor } from "@/lib/db/lessons";
 import { storageConfigured } from "@/lib/storage/provider";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
+import AwaitingAllocation from "@/components/tutor/AwaitingAllocation";
 import NewAssignmentForm from "./NewAssignmentForm";
 
 /**
@@ -96,6 +98,12 @@ export default async function NewAssignmentPage() {
           No classes are assigned to you yet. Ask your school admin to assign your
           classes in ResultPeak.
         </p>
+      ) : isAwaitingAllocation(session) ? (
+        /* Enforcement on, no allocation. After the class check, so a tutor with
+           neither is told about the more basic problem first. */
+        <div className="mt-6">
+          <AwaitingAllocation noun="work" />
+        </div>
       ) : (
         <NewAssignmentForm
           classes={classes.map((c) => ({ id: c.id, name: c.name }))}

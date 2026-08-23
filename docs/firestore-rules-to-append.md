@@ -223,7 +223,74 @@ match /jdCaScores/{id} {
   allow read: if isSchoolAdmin(resource.data.get('schoolId', ''));
   allow write: if false;              // Admin SDK only
 }
+
+// ---------- announcements, added 2026-08-22 ----------
+// NOTE ON jdNotifications BELOW: it already has a block in this file. The
+// collection did not change shape, but it gained `audience: 'school'` and a
+// student-facing reach, so the existing rule's reasoning is restated where it
+// now matters. Replace the existing jdNotifications block with this one rather
+// than adding a second - two match blocks on one path both evaluate, and the
+// permissive one wins.
+
+match /jdNotifications/{id} {
+  // Tutor notifications, the class activity feed, AND school announcements, in
+  // one collection split by `audience` ('school' | 'class' | 'tutor').
+  //
+  // isMember(), never a claim comparison - see the 2026-08-12 incident at the
+  // top of this file. A school-wide announcement carries targetId == schoolId,
+  // so there is no separate branch for it: the schoolId field is what scopes
+  // every read here, exactly as before.
+  //
+  // STUDENTS DO NOT READ THIS COLLECTION DIRECTLY AND MUST NOT BE GIVEN A
+  // BRANCH HERE. Students have no Firebase Auth identity at all - they sign in
+  // with a school + username + access code against a server-minted session
+  // cookie, so `request.auth` is null for every one of them. Announcements
+  // reach a student through the authenticated /api/student/sync route using the
+  // Admin SDK. A student branch in this file could only be written as a public
+  // read branch, which CLAUDE.md forbids outright.
+  allow read: if isMember(resource.data.get('schoolId', ''));
+  allow write: if false;              // Admin SDK only; authorship checked server-side
+}
+
+match /jdReadState/{id} {
+  // One document per reader: a `seenAt` high-water mark plus a capped list of
+  // dismissed announcement ids. Doc id is `${schoolId}_${readerId}`.
+  //
+  // Holds NO personal data by design - a readerId, two timestamps and a list of
+  // announcement ids. It is not a roster and reveals nothing about a child
+  // beyond that they opened the app.
+  //
+  // Admin-only read, and deliberately narrower than jdNotifications: a tutor has
+  // no reason to see which children have read a notice, and CLAUDE.md's "never a
+  // channel" rule refuses per-reader delivery receipts shown back to an author.
+  allow read: if isSchoolAdmin(resource.data.get('schoolId', ''));
+  allow write: if false;              // Admin SDK only
+}
+
+match /schemes/{schemeId} {
+  // Scheme of work / curriculum documents a tutor uploads for a (class, subject).
+  //
+  // No marking guide and no field one could occupy, so unlike `assignments` this
+  // is not tutor-only content. It is still member-scoped rather than public:
+  // CLAUDE.md allows no public read branch on any JDSmartLearn collection, and
+  // students reach a published scheme through a server route, never from here.
+  allow read: if isMember(resource.data.get('schoolId', ''));
+  allow write: if false;              // Admin SDK only; class+subject scope checked server-side
+}
 ```
+
+### Ordering for the announcement work
+
+**JDSmartLearn is safe to ship first, and this append is not a blocker.** Every
+read and write of all three collections above goes through the Admin SDK on a
+server route, which bypasses rules entirely. The block is defence in depth: it is
+what keeps a future client-SDK read — or a leaked project config — from reaching
+them. Land it in the same release window, not necessarily before.
+
+The one thing that IS worth doing before the append: confirm `isMember()` still
+exists in the canonical file. This block calls `isMember()` and
+`isSchoolAdmin()`, and a call to a helper that does not exist fails to compile
+and takes the entire working ruleset down with it on deploy.
 
 ## BLOCKING: the fold into `manualScores` must be idempotent
 
@@ -315,6 +382,15 @@ Three reasons, in order of weight:
    a fail-open condition written three ways in a language where a missing field
    is an error, and an erroring rule denies. That is the shape of the 2026-08-12
    incident described at the top of this file.
+
+**Reason 3 got worse, not better, when the school flag landed.** Enforcement is
+gated on `schools/{schoolId}.subjectAllocation`, which is a *different document*
+from the tutor profile. A rule would now need **two** `get()`s per document
+evaluated — school and tutor — to answer a question that changes nothing about
+what any client may read or write. And it would have to encode the same four-row
+truth table the route handlers use, in a language where a missing field is an
+error and an erroring rule denies, for the row whose entire purpose is to
+distinguish a missing field from a false one.
 
 The subject check therefore lives only where it can be written safely and read
 plainly: `assertSubjectAccess()` and `assertDocumentSubjectAccess()` in

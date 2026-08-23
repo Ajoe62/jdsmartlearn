@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { RP } from "@/lib/db/collections";
+import { getSubjectAllocationEnforced } from "@/lib/db/resultpeak";
 import { claimRefusal, isAdmin } from "@/lib/auth/roles";
 import { teachesSubject, teachesSubjectInClass } from "@/lib/auth/subject-access";
 import type { ClaimRefusal } from "@/lib/auth/roles";
@@ -14,6 +15,16 @@ export interface TutorSession {
   /** Admin-level actor (school admin or superadmin) - see lib/auth/roles. */
   isAdmin: boolean;
   assignedClasses: string[];
+
+  /**
+   * Display name from the same ResultPeak profile read, so it costs nothing.
+   *
+   * Empty string when absent, which is normal: a school admin has no
+   * `schools/{id}/tutors/{uid}` document at all. Used only to sign an
+   * announcement ("From Mrs Adeyemi"); every reader-facing fallback is in
+   * `toNoticeItem()`, which never shows a uid.
+   */
+  name: string;
 
   /**
    * Subject allocation, from the same profile read as assignedClasses.
@@ -29,6 +40,17 @@ export interface TutorSession {
   assignedSubjects: string[];
   /** subjectId -> classIds. */
   subjectClasses: Record<string, string[]>;
+
+  /**
+   * The SCHOOL's enforcement flag, not a property of this tutor.
+   *
+   * Absent means off, so this is false for every school today. It is what turns
+   * the two fields above from a picker convenience into an authorization check -
+   * see the truth table in lib/auth/subject-access. Carried on the session so
+   * the pure module gets one object with everything it needs; costs one cached
+   * read per school per minute, never a read per request.
+   */
+  subjectAllocationEnforced: boolean;
 }
 
 const SESSION_COOKIE = "jd_tutor";
@@ -106,6 +128,16 @@ export async function getTutorSession(): Promise<TutorSession | null> {
       }
     }
 
+    /**
+     * Read AFTER the loop above, because that loop is what resolves which school
+     * this tutor actually belongs to when their claims name more than one.
+     * Reading it against `claims.schoolId` would check the wrong school's flag
+     * for exactly the multi-school accounts the loop exists to handle.
+     *
+     * Cached for 60s per school, so this is not a per-request read.
+     */
+    const subjectAllocationEnforced = await getSubjectAllocationEnforced(schoolId);
+
     return {
       uid: decoded.uid,
       schoolId,
@@ -113,10 +145,13 @@ export async function getTutorSession(): Promise<TutorSession | null> {
       isAdmin: isAdmin(claims) && schoolId === claims.schoolId,
       // Admins are not restricted to assignedClasses.
       assignedClasses: profile?.assignedClasses ?? [],
+      name: profile?.name ?? "",
       // Same profile read, no extra Firestore cost. Absent on a tutor ResultPeak
-      // has not allocated yet, which is the legacy "every subject" state.
+      // has not allocated yet - which means "every subject" while the school
+      // flag below is off, and "no subject" once it is on.
       assignedSubjects: profile?.assignedSubjects ?? [],
       subjectClasses: profile?.subjectClasses ?? {},
+      subjectAllocationEnforced,
     };
   } catch {
     return null;
@@ -166,6 +201,14 @@ export function assertSubjectTaught(session: TutorSession, subjectId: string): v
  * check would 404 a teacher out of their own work - a lesson still listed on
  * their own dashboard. It also matches the Firestore rules, which already scope
  * tutor reads to `tutorId == request.auth.uid`.
+ *
+ * THE BYPASS SURVIVES ENFORCEMENT, by an explicit decision. Switching the school
+ * flag on does not re-scope documents a tutor already wrote: they keep access to
+ * their own work whatever subject it carries. The alternative - re-checking
+ * authored documents against the new allocation - would strand a teacher's own
+ * lessons behind a 404 on the day their school turned the flag on, which is the
+ * worst possible moment to discover an allocation is wrong. Enforcement governs
+ * what a tutor may CREATE next, not what they wrote before.
  *
  * What this still closes: a colleague teaching a DIFFERENT subject in the same
  * class can no longer open the document and read its marking guide.
