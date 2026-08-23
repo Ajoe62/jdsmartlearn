@@ -513,6 +513,14 @@ export interface AssignmentListItem {
   type: AssignmentType;
   dueDate: number;
   maxMarks: number;
+  /**
+   * The assignment's own term and session, verbatim, so the subject shelf can
+   * filter WITH NO NETWORK. Nullable for the same reason a lesson's are: an
+   * assignment set before the field existed carries neither, and a term is never
+   * guessed from a due date.
+   */
+  term: string | null;
+  session: string | null;
   /** Null on the Pending tab, where by definition no submission exists. */
   status: SubmissionStatus | null;
   submittedAt: number | null;

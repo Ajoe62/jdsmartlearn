@@ -41,6 +41,20 @@ export interface ResultPeakSchool {
   subjects: { id: string; name: string }[];
   gradingScale: { min: number; letter: string; remark: string }[];
   isActive: boolean;
+  /**
+   * Whether this school enforces (classId, subjectId) tutor allocation.
+   *
+   * ABSENT MEANS OFF, and that is the whole reason the field exists. Without it
+   * there is no way to tell "this school predates subject allocation" from
+   * "this tutor was invited on Friday and nobody has allocated them yet" - and
+   * treating the second as unrestricted is how an unallocated tutor silently
+   * holds a whole school.
+   *
+   * Read it through getSubjectAllocationEnforced() in lib/db/resultpeak, never
+   * off a school document somebody already had: see the note there about why
+   * this one field is cached and the rest of the document is not.
+   */
+  subjectAllocation?: boolean;
 }
 
 export interface ResultPeakClass {
@@ -138,6 +152,22 @@ export interface Lesson {
   fileName?: string;
   fileSize?: number;
   fileType?: string;
+  /**
+   * ResultPeak's term and session strings, copied BYTE FOR BYTE at creation and
+   * never resolved again. Same rule as Assignment - see lib/academic-calendar.
+   *
+   * `null` on lessons created before 2026-08-22, and on lessons created while a
+   * school admin has not set the current term yet. NEVER GUESSED FROM
+   * `createdAt`: a Nigerian school year spans two calendar years and ResultPeak's
+   * own session default is wrong for two thirds of it (docs/resultpeak-defects.md,
+   * defect 1), so a guess would file a lesson under a term it was not taught in
+   * and nothing would error. The subject shelf shows these under "Earlier".
+   *
+   * NOT to be confused with `Topic.term`, which is JDSmartLearn's own 1 | 2 | 3
+   * curriculum ordering and takes part in no ResultPeak join.
+   */
+  term: string | null;
+  session: string | null;
   /** Study-guide lifecycle. `published` means the AI study guide is student-visible. */
   status: LessonStatus;
   /** When the study guide was published. */
@@ -212,6 +242,13 @@ export interface SyncLesson {
   hasMaterial: boolean;
   hasStudyGuide: boolean;
   updatedAt: number;
+  /**
+   * Term and session, verbatim, so the subject shelf can filter WITH NO NETWORK.
+   * Both null on lessons that predate the field - the shelf groups those under
+   * "Earlier" and never guesses. See the note on Lesson.term.
+   */
+  term: string | null;
+  session: string | null;
   studyGuide: { summary: string; questions: PracticeQuestion[] } | null;
   file: { name: string; size: number; inline: boolean } | null;
 }
