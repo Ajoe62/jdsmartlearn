@@ -28,13 +28,21 @@ JDSmartLearn runs **inside ResultPeak's existing Firebase project**. Same `proje
 
 ### Collections ResultPeak owns — READ ONLY, NEVER WRITE
 
-`schools`, `classes`, `students`, `studentAccess`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`
+`schools`, `classes`, `students`, `studentAccess`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`
 
 Never create, update, or delete a document in any of them. Never build roster CRUD, CSV import, or a second student registry — that data already exists and ResultPeak owns it.
 
+**`attendance` and `termNotes` are read-only in a stronger sense than the rest, and "don't mirror it" is part of the rule.** `attendance` is one document per class per day at the deterministic key `{schoolId}_{classId}_{YYYY-MM-DD}`, written only by the named class teacher; `termNotes` holds term comments and skill ratings and is class-teacher-only once a school enables subject allocation. Because the attendance id is deterministic, a write from here does not create a stray parallel record somebody could spot and delete — it lands on top of the real register, and afterwards neither side can tell which entries were the teacher's. If either is ever needed here, READ it. Copying one into a JD collection is the same problem with an extra step: the copy drifts silently the first time a teacher edits the original. Attendance is separately out of scope as a feature — see the v1 list.
+
 ### Collections JDSmartLearn owns — read and write
 
-`topics`, `lessons`, `generatedContent`, `lessonViews`, `jdAuditLogs`, `studentLogins`
+`topics`, `lessons`, `generatedContent`, `lessonViews`, `jdAuditLogs`, `studentLogins`,
+`assignments`, `submissions`, `studentProgress`, `jdNotifications`, `jdSchoolSettings`,
+`jdCaScores`, `jdReadState`, `schemes`
+
+`src/lib/db/collections.ts` is the runtime source of truth for this list and
+carries the reasoning for each. Keep the two in step: a collection that exists
+in code but not here is one nobody reviews.
 
 `studentLogins` is a **credential alias only**: `{schoolId}_{username}` → `studentId`, so a
 child types `jss3-04` instead of a 20-character document id. It is not a second student
@@ -181,9 +189,91 @@ are the condition of the override, not commentary on it.
 - **Term and session are ResultPeak's strings, copied byte for byte.** Never construct, normalise, trim, or case fold one, and never store a term as a number. They are stamped onto an assignment at creation and copied to its submissions, then never resolved again: the current term moves, but an assignment created in first term must still report first term when read in third. ResultPeak records no current term anywhere, so `jdSchoolSettings` holds it as a stopgap, read only through `getCurrentTermSession()`.
 - Offline: a text-only submission may queue and flush on reconnect. **A submission with attachments requires a connection** and says so before the student starts writing. Files never enter IndexedDB.
 
+## Announcement rules
+
+Notice boards were out of scope until the owner overrode that on 2026-08-22.
+Announcements, the student subject shelf and tutor-uploaded schemes of work are
+in scope now, under these rules. The rules are the condition of the override,
+not commentary on it.
+
+- **An announcement is school content, never personal content.** It carries a
+  title, a short body, a category and a date window — no student name, no mark,
+  no per-child text, nothing derived from one reader. That is what lets ONE
+  document be read by a whole class. The moment an announcement needs to say
+  something different to two children, it is not an announcement and does not
+  belong here.
+- **No push, no polling, no listeners, no `onSnapshot`.** Announcements arrive on
+  the existing on-demand sync triggers — app open, reconnect, explicit button,
+  one-shot Background Sync tag — folded into the responses those triggers already
+  make. This does not relax the no-polling rule in Quota rules; it is that rule.
+  **"Urgent" is a tone, not a delivery mechanism.** A loud red card that arrives
+  on the next sync is the whole feature; a notice that must arrive faster than
+  the next sync is a different product and needs its own decision.
+- **Read state is per reader, never per reader × announcement.** One
+  `jdReadState` document per person, holding a `seenAt` high-water mark and a
+  capped list of individually dismissed ids. The obvious
+  `{announcementId}_{studentId}` shape is announcements × students documents
+  forever, on a quota shared with a live school's exam day.
+- **Never AI-generated.** A resumption date is a fact a school states, not a
+  draft a model proposes. No announcement text goes through
+  `src/lib/ai/provider.ts`, and none is ever sent to the provider.
+- **Never a channel.** No replies, no threads, no reactions, no per-reader
+  delivery receipts shown back to the author. Chat stays out of scope, and an
+  announcement that can be answered is chat.
+- **Authorship is scoped like every other write.** A school admin may address the
+  whole school or any class in it; a tutor may address only classes in their
+  `assignedClasses`, read fresh from ResultPeak on the request. Checked
+  server-side, on every request, never by hiding the picker.
+- **JDSmartLearn owns `jdNotifications` outright.** ResultPeak's `notifications`
+  collection stays untouched in both directions: this repo never writes theirs
+  and never reads theirs into a JD feed. If the school office ever wants one
+  place to post from, the move is a ResultPeak composer calling a JD route — not
+  a second feed to keep in step. See `docs/resultpeak-announcements-prompt.md`.
+
+### Subject shelf rules
+
+- **A subject list is derived, and the derivation is labelled.** ResultPeak has
+  no per-student and no per-class subject list: `schools/{id}.subjects[]` is
+  school-wide and `classes/{id}` carries no subjects at all. The only
+  class-to-subject link in the shared project is the tutor allocation
+  `schools/{id}/tutors/{uid}.subjectClasses`. Until ResultPeak owns
+  `classes/{id}.subjectIds[]`, the shelf is the union of that allocation with the
+  subjects that actually have a lesson or an assignment for the class. This is a
+  workaround, it is named as one in the code, and the real fix is
+  `docs/resultpeak-class-subjects-prompt.md`.
+- **`lessons` carry `term` and `session`, stamped once at creation and copied
+  verbatim**, exactly as assignments already do. Never re-resolved on read: a
+  lesson created in first term still reports first term when read in third.
+  Lessons that predate the field read `null` and show under "Earlier" — a term is
+  never guessed from a timestamp.
+- **`Topic.term` is not an academic term.** It is JDSmartLearn's own `1 | 2 | 3`
+  curriculum ordering, seeded from `seed/topics/`, and it takes part in no
+  ResultPeak join. Never compare one to an `AcademicTerm`, never render one as
+  the other.
+- **The shelf shows JDSmartLearn's own record only.** Lessons, schemes,
+  assignments, and CA percentages computed here from finalised submissions.
+  ResultPeak's exams and results are linked out, never restaged: duplicating
+  their surface is how two products drift into disagreeing about a child's marks.
+
+### Scheme of work rules
+
+- **Never AI-generated and never sent to the provider.** A scheme is the school's
+  own curriculum document. Summarising it would invent curriculum, and it must
+  not spend the daily generation cap.
+- Stored in Cloudflare R2 through `src/lib/storage/provider.ts` and served only
+  through an authenticated route, the same as lesson files. Never a bucket URL.
+- A scheme has no marking guide and no field one could occupy, so it is safe for
+  the student device store. It is the ideal thing to save on a phone.
+
 ## Out of scope for v1 — refuse these
 
-WhatsApp integration · payments or Paystack · chat · video streaming · notice boards · live classes · quiz engine with auto-marked objective questions · multiple question difficulty tiers · attendance · timetable · admissions · multi-branch · local languages · voice narration · native mobile apps · revision recommendations derived from ResultPeak exam results (still blocked until ResultPeak tags questions by topic and grades server-side)
+WhatsApp integration · payments or Paystack · chat · video streaming · live classes · quiz engine with auto-marked objective questions · multiple question difficulty tiers · attendance · timetable · admissions · multi-branch · local languages · voice narration · native mobile apps · revision recommendations derived from ResultPeak exam results (still blocked until ResultPeak tags questions by topic and grades server-side)
+
+**"Notice boards" left this list on 2026-08-22** and became Announcement rules
+above. `chat` did not move and is not adjacent to it: an announcement is a
+one-way school notice with no reply path, and the "never a channel" rule is what
+keeps the two apart. A request to let students respond to an announcement is a
+request for chat and is still refused.
 
 **File storage: Cloudflare R2, never Firebase Storage.** Original lesson files are stored in Cloudflare R2 (free tier, zero egress) *in addition to* the extracted text — the text remains the student-facing default on slow networks. All storage access goes through `src/lib/storage/provider.ts`; no storage SDK is imported anywhere else. Files are served ONLY via the authenticated `/api/lessons/[id]/file` route (schoolId + class scoping, material-publish gating for students) — never a public bucket URL. **Firebase Storage remains forbidden** — it would force the shared project onto Blaze. If R2 credentials are absent, uploads gracefully degrade to text-only.
 

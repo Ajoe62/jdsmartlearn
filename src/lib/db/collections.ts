@@ -43,11 +43,60 @@ export const JD = {
   /** Flat, at `${schoolId}_${studentId}_${subjectId}`. No subcollections. */
   studentProgress: "studentProgress",
   /**
-   * Tutor notifications and the class activity feed in one collection, split by
-   * `audience`. A separate feed collection would double the writes for the same
-   * two equality queries. NOT ResultPeak's `notifications`, which we never touch.
+   * Tutor notifications, the class activity feed AND school announcements, in
+   * one collection split by `audience`. A separate feed collection would double
+   * the writes for the same two equality queries. NOT ResultPeak's
+   * `notifications`, which we never touch in either direction.
+   *
+   * The name predates announcements and is deliberately not being changed: it is
+   * in ResultPeak's deployed `firestore.rules`, and renaming a collection in a
+   * shared project to improve a word is not worth a rules deploy against a live
+   * school. Interpret every document through `normaliseNotice()` in
+   * `lib/announcements/notices.ts` - rows written before 2026-08-22 carry none
+   * of the announcement fields, and that function is where the defaults live.
    */
   notifications: "jdNotifications",
+  /**
+   * What one reader has already seen: a `seenAt` high-water mark and a capped
+   * list of individually dismissed notice ids, at `${schoolId}_${readerId}`.
+   *
+   * ONE DOCUMENT PER READER, never one per reader per notice. The obvious
+   * `{noticeId}_{studentId}` shape grows as notices x students without bound.
+   * Holds no personal data: a reader id, two timestamps, and notice ids.
+   */
+  readState: "jdReadState",
+  /**
+   * THERE IS DELIBERATELY NO `jdClassSubjects` COLLECTION, and adding one back
+   * would be a step backwards.
+   *
+   * The subjects a class offers have to be derived here, because ResultPeak has
+   * no per-class subject list - `schools/{id}.subjects[]` is school-wide and
+   * `classes/{id}` carries no subjects at all. The obvious move is to persist
+   * that derivation at `${schoolId}_${classId}` and rebuild it on lesson publish
+   * and assignment create.
+   *
+   * It was designed that way and then dropped, because the expensive half is the
+   * TUTOR ALLOCATION SCAN, and a per-class document does not make it cheaper: a
+   * school with twelve classes would rebuild twelve documents from twelve scans
+   * of the same `schools/{id}/tutors` collection, up to 200 reads each.
+   * `getSchoolAllocation()` in `db/class-subjects.ts` caches that ONE scan per
+   * school instead, and every class is then derived from it for free.
+   *
+   * What a document would have added on top of that: a write on every rebuild, a
+   * second staleness window to reason about beside the cache's, and a collection
+   * to delete when `classes/{id}.subjectIds[]` ships in ResultPeak. See
+   * `docs/resultpeak-class-subjects-prompt.md`.
+   */
+  /**
+   * Scheme of work / curriculum documents a tutor uploads for a (class, subject).
+   *
+   * Separate from `lessons` on purpose. A scheme has no AI generation, no
+   * practice questions, no marking guide and its own publish switch; folding it
+   * into `lessons` would put four unused fields on every lesson and a `kind`
+   * check on every query that reads one. It reuses the R2 storage provider and
+   * the authenticated file route, which is the part worth sharing.
+   */
+  schemes: "schemes",
   /**
    * Per-school assessment settings, one document at `{schoolId}`.
    *
@@ -80,10 +129,34 @@ export const SHARED = {
   studentAcademicRecords: "studentAcademicRecords",
 } as const;
 
+/**
+ * Collections ResultPeak owns. `assertWritable()` refuses every write to one.
+ *
+ * `attendance` is the newest entry and the one most worth understanding, because
+ * it was missing from this set for a while after ResultPeak shipped it - which
+ * meant the guard that exists to stop this repo touching a paying school's data
+ * would have let an attendance write straight through.
+ *
+ * It is a flat collection, one document per class per day, at the natural key
+ * `{schoolId}_{classId}_{YYYY-MM-DD}`, written only by the named class teacher
+ * and enforced in ResultPeak's rules. THE DETERMINISTIC ID IS WHY THIS MATTERS
+ * MORE THAN MOST: a write from here would not create a stray parallel record
+ * that somebody could spot and delete later, it would land on top of the real
+ * register for that class on that day. Two registers for one class on one day is
+ * a data problem nobody can untangle afterwards, because neither side can tell
+ * which entries were the teacher's.
+ *
+ * If JDSmartLearn ever needs attendance, READ this collection. Do not write it
+ * and do not mirror it into a JD collection - a mirror is the same problem with
+ * an extra step, since it drifts silently the moment a teacher edits the
+ * original. The same reasoning applies to `termNotes`, which holds term comments
+ * and skill ratings and is class-teacher-only once a school enables allocation.
+ */
 export const RESULTPEAK_OWNED = new Set<string>([
   "schools", "classes", "students", "studentAccess", "exams", "examTemplates",
   "results", "examSessions", "theorySubmissions", "manualScores", "termNotes",
   "flags", "notifications", "adminAuditLogs", "studyDocuments", "admins",
+  "attendance",
 ]);
 
 /**
@@ -127,3 +200,14 @@ export const QUERY_LIMIT = 200;
  * accumulate assignments all year, and a phone on 3G should not download them all.
  */
 export const LIST_LIMIT = 50;
+
+/**
+ * Cap on one audience's notice query, per query.
+ *
+ * Tighter again, and it is the reason the date window can be applied in memory:
+ * whatever a school has posted since September, at most this many documents are
+ * ever examined, and the live subset is smaller still. It also bounds the unread
+ * pile a student who has never opened the app can face - see the note on
+ * `seenAt` in `lib/announcements/notices.ts`.
+ */
+export const NOTICE_LIMIT = 40;
