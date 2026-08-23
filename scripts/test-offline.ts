@@ -30,7 +30,8 @@ import {
   sortSessionsDescending,
   termOrder,
 } from "../src/lib/academic-calendar";
-import { assertRecordFields } from "../src/lib/db/write-guard";
+import { assertRecordFields, assertWritable } from "../src/lib/db/write-guard";
+import { JD, RESULTPEAK_OWNED } from "../src/lib/db/collections";
 import { readOnlyDb } from "../src/lib/db/read-only";
 import {
   auditTermSessions,
@@ -53,8 +54,34 @@ import {
   type SweepCandidate,
 } from "../src/lib/assessment/grading-recovery";
 import { SKIP_ORDER, SKIP_TEXT, detectSkips } from "../src/lib/assessment/skips";
+import {
+  EMPTY_READ_STATE,
+  MAX_READ_IDS,
+  isLive,
+  isUnread,
+  nextReadState,
+  normaliseNotice,
+  reachesStudents,
+  sortNotices,
+  toNoticeItem,
+  unreadCount,
+  visibleToStudent,
+  visibleToTutor,
+  type Notice,
+} from "../src/lib/announcements/notices";
+import {
+  ALL_TERMS,
+  buildShelf,
+  isUndated,
+  matchesTerm,
+  shelfTotals,
+  termOptions,
+  type ShelfAssignment,
+  type ShelfLesson,
+} from "../src/lib/shelf/build";
 import { claimRefusal } from "../src/lib/auth/claims";
 import {
+  isAwaitingAllocation,
   isUnallocated,
   teachesSubject,
   teachesSubjectInClass,
@@ -88,6 +115,8 @@ function entry(over: Partial<SyncIndexEntry> = {}): SyncIndexEntry {
     hasMaterial: true,
     hasStudyGuide: true,
     updatedAt: 1000,
+    term: "First Term",
+    session: "2025/2026",
     file: null,
     ...over,
   };
@@ -455,6 +484,45 @@ test("sessions sort newest first", () => {
     sortSessionsDescending(["2024/2025", "2026/2027", "2025/2026"]),
     ["2026/2027", "2025/2026", "2024/2025"]
   );
+});
+
+// ---------------------------------------------------------------------------
+// Collection ownership: the guard that keeps this repo out of ResultPeak's data
+// ---------------------------------------------------------------------------
+
+test("assertWritable refuses every ResultPeak-owned collection", () => {
+  for (const name of RESULTPEAK_OWNED) {
+    assert.throws(
+      () => assertWritable(name),
+      /ResultPeak owns this collection/,
+      `expected ${name} to be refused`
+    );
+    // Subcollection paths too - the guard reads the first segment.
+    assert.throws(() => assertWritable(`${name}/abc`), /ResultPeak owns/);
+  }
+});
+
+test("assertWritable refuses attendance and termNotes by name", () => {
+  /**
+   * Named individually rather than left to the loop above, because these two are
+   * the ones somebody is most likely to reach for from a feature request, and
+   * `attendance` was genuinely missing from the set for a while after ResultPeak
+   * shipped it - the guard would have let a write through.
+   *
+   * Attendance ids are deterministic (`{schoolId}_{classId}_{YYYY-MM-DD}`), so a
+   * write from here lands ON TOP of the real register rather than beside it, and
+   * afterwards nobody can tell which entries were the teacher's.
+   */
+  assert.throws(() => assertWritable("attendance"), /ResultPeak owns/);
+  assert.throws(() => assertWritable("termNotes"), /ResultPeak owns/);
+});
+
+test("assertWritable allows the collections JDSmartLearn owns", () => {
+  // The guard has to stay narrow: a set that swallowed a JD collection would
+  // break the product's own writes.
+  for (const name of Object.values(JD)) {
+    assert.doesNotThrow(() => assertWritable(name), `expected ${name} to be writable`);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1196,6 +1264,406 @@ test("an invited admin with no school yet is refused for the right reason", () =
 });
 
 // ---------------------------------------------------------------------------
+// Announcements: visibility and read state
+// ---------------------------------------------------------------------------
+
+/** A notice with sensible defaults, so each test states only what it is about. */
+function notice(over: Partial<Notice> & { id: string }): Notice {
+  return {
+    schoolId: "SCH",
+    audience: "school",
+    targetId: "SCH",
+    type: "announcement",
+    title: "Notice",
+    body: "Body",
+    entityId: "",
+    createdAt: 1_000,
+    reach: "everyone",
+    category: "general",
+    priority: "normal",
+    startsAt: 0,
+    expiresAt: null,
+    createdBy: "uid",
+    createdByName: "The school office",
+    ...over,
+  };
+}
+
+test("a legacy row normalises to what it always meant", () => {
+  // Written by the assessment feature before announcements existed: no reach, no
+  // category, no schedule. It was the class activity feed, so it is student-facing.
+  const n = normaliseNotice("n1", {
+    schoolId: "SCH",
+    audience: "class",
+    targetId: "C1",
+    type: "assignment_set",
+    title: "New assignment",
+    body: "Algebra, due Friday",
+    entityId: "A1",
+    createdAt: 5_000,
+  });
+
+  assert.equal(n.reach, "students");
+  assert.equal(n.category, "general");
+  assert.equal(n.priority, "normal");
+  // Not 0: a notice with no schedule is visible from when it was written.
+  assert.equal(n.startsAt, 5_000);
+  assert.equal(n.expiresAt, null);
+});
+
+test("a tutor-audience legacy row stays staff-only", () => {
+  const n = normaliseNotice("n1", {
+    schoolId: "SCH",
+    audience: "tutor",
+    targetId: "uid",
+    type: "grading_failed",
+    title: "Marking needs you",
+    body: "",
+    entityId: "S1",
+    createdAt: 5_000,
+  });
+  assert.equal(n.reach, "tutors");
+  assert.equal(reachesStudents(n), false);
+});
+
+test("the safe projection has no field an author uid could occupy", () => {
+  const item = toNoticeItem(notice({ id: "n1", createdBy: "SECRET_UID" }));
+  assert.deepEqual(Object.keys(item).sort(), [
+    "body",
+    "category",
+    "createdAt",
+    "from",
+    "id",
+    "priority",
+    "title",
+  ]);
+  assert.equal(JSON.stringify(item).includes("SECRET_UID"), false);
+});
+
+test("an author with no name falls back to a role, never a uid", () => {
+  const school = toNoticeItem(notice({ id: "n1", createdByName: "", audience: "school" }));
+  assert.equal(school.from, "Your school");
+  const klass = toNoticeItem(
+    notice({ id: "n2", createdByName: "", audience: "class", targetId: "C1" })
+  );
+  assert.equal(klass.from, "Your teacher");
+});
+
+test("the date window opens and closes", () => {
+  const scheduled = notice({ id: "n1", startsAt: 2_000, expiresAt: 4_000 });
+  assert.equal(isLive(scheduled, 1_999), false, "not yet started");
+  assert.equal(isLive(scheduled, 2_000), true, "starts inclusively");
+  assert.equal(isLive(scheduled, 3_999), true);
+  // Exclusive: a notice that expires at 4000 is gone at 4000.
+  assert.equal(isLive(scheduled, 4_000), false);
+  assert.equal(isLive(notice({ id: "n2" }), Number.MAX_SAFE_INTEGER), true, "no expiry");
+});
+
+test("a staff-only notice never reaches a student", () => {
+  const staff = notice({ id: "n1", audience: "school", reach: "tutors" });
+  const both = notice({ id: "n2", audience: "school", reach: "everyone" });
+  const visible = visibleToStudent([staff, both], "C1", 10_000);
+  assert.deepEqual(visible.map((n) => n.id), ["n2"]);
+});
+
+test("a student sees their own class and no other", () => {
+  const mine = notice({ id: "n1", audience: "class", targetId: "C1", reach: "students" });
+  const theirs = notice({ id: "n2", audience: "class", targetId: "C2", reach: "students" });
+  const schoolWide = notice({ id: "n3", audience: "school" });
+  const visible = visibleToStudent([mine, theirs, schoolWide], "C1", 10_000);
+  assert.deepEqual(visible.map((n) => n.id).sort(), ["n1", "n3"]);
+});
+
+test("an unknown audience is invisible rather than visible to everyone", () => {
+  // The filters test positively, so a value added later defaults to hidden.
+  const odd = notice({ id: "n1", audience: "guardian" as Notice["audience"] });
+  assert.deepEqual(visibleToStudent([odd], "C1", 10_000), []);
+  assert.deepEqual(visibleToTutor([odd], "uid", ["C1"], 10_000), []);
+});
+
+test("urgent sorts above newer normal notices", () => {
+  const old_urgent = notice({ id: "u", priority: "urgent", createdAt: 1_000 });
+  const new_normal = notice({ id: "n", priority: "normal", createdAt: 9_000 });
+  assert.deepEqual(sortNotices([new_normal, old_urgent]).map((n) => n.id), ["u", "n"]);
+});
+
+test("a notice stays unread until it is dismissed", () => {
+  const n = notice({ id: "n1", createdAt: 5_000 });
+  assert.equal(isUnread(n, EMPTY_READ_STATE), true);
+  // The high-water mark must NOT advance just because the student looked at the
+  // dashboard - that would delete the whole feature.
+  const after = nextReadState(EMPTY_READ_STATE, [n], []);
+  assert.equal(isUnread(n, after), true);
+  const dismissed = nextReadState(EMPTY_READ_STATE, [n], ["n1"]);
+  assert.equal(isUnread(n, dismissed), false);
+});
+
+test("dismissing everything collapses the list into the watermark", () => {
+  const all = [
+    notice({ id: "a", createdAt: 1_000 }),
+    notice({ id: "b", createdAt: 2_000 }),
+    notice({ id: "c", createdAt: 3_000 }),
+  ];
+  const state = nextReadState(EMPTY_READ_STATE, all, ["a", "b", "c"]);
+  assert.equal(state.seenAt, 3_000);
+  assert.deepEqual(state.readIds, [], "the watermark says it in one number");
+  for (const n of all) assert.equal(isUnread(n, state), false);
+});
+
+test("the watermark stops at the first notice nobody dismissed", () => {
+  const all = [
+    notice({ id: "a", createdAt: 1_000 }),
+    notice({ id: "b", createdAt: 2_000 }),
+    notice({ id: "c", createdAt: 3_000 }),
+  ];
+  // Out of order: the oldest and the newest, skipping the middle one.
+  const state = nextReadState(EMPTY_READ_STATE, all, ["a", "c"]);
+  assert.equal(state.seenAt, 1_000, "cannot swallow b");
+  assert.deepEqual(state.readIds, ["c"]);
+  assert.equal(isUnread(all[1], state), true, "b is still unread");
+  assert.equal(isUnread(all[2], state), false, "c is still dismissed");
+});
+
+test("a dismissal for a notice the server no longer lists is kept", () => {
+  // A phone offline for a week dismisses something that has since expired off
+  // the bundle. Losing that would make it pop back up if it were un-expired.
+  const state = nextReadState(EMPTY_READ_STATE, [], ["gone"]);
+  assert.deepEqual(state.readIds, ["gone"]);
+  assert.equal(state.seenAt, 0);
+});
+
+test("the read list is capped, and capping never resurrects a recent dismissal", () => {
+  // MAX_READ_IDS + 10 notices, every other one dismissed so the lossless pass
+  // cannot collapse them, forcing the lossy pass.
+  const many = Array.from({ length: MAX_READ_IDS + 10 }, (_, i) =>
+    notice({ id: `n${i}`, createdAt: 1_000 + i })
+  );
+  const dismissed = many.map((n) => n.id);
+  // Leave the very first one undismissed so the watermark cannot walk at all.
+  dismissed.shift();
+
+  const state = nextReadState(EMPTY_READ_STATE, many, dismissed);
+  assert.ok(
+    state.readIds.length <= MAX_READ_IDS,
+    `readIds grew to ${state.readIds.length}`
+  );
+  // The newest dismissals survive; the oldest are absorbed by the watermark.
+  const newest = many[many.length - 1];
+  assert.equal(isUnread(newest, state), false, "the newest dismissal survived");
+});
+
+test("unreadCount counts what the badge shows", () => {
+  const all = [
+    notice({ id: "a", createdAt: 1_000 }),
+    notice({ id: "b", createdAt: 2_000 }),
+  ];
+  assert.equal(unreadCount(all, EMPTY_READ_STATE), 2);
+  assert.equal(unreadCount(all, nextReadState(EMPTY_READ_STATE, all, ["a"])), 1);
+  assert.equal(unreadCount(all, nextReadState(EMPTY_READ_STATE, all, ["a", "b"])), 0);
+});
+
+// ---------------------------------------------------------------------------
+// The subject shelf
+// ---------------------------------------------------------------------------
+
+const FIRST = { term: "First Term", session: "2025/2026" };
+const SECOND = { term: "Second Term", session: "2025/2026" };
+
+function shelfLesson(over: Partial<ShelfLesson> & { lessonId: string }): ShelfLesson {
+  return {
+    subjectId: "biology",
+    hasMaterial: true,
+    hasStudyGuide: false,
+    term: FIRST.term,
+    session: FIRST.session,
+    ...over,
+  };
+}
+
+function shelfAssignment(
+  over: Partial<ShelfAssignment> & { assignmentId: string }
+): ShelfAssignment {
+  return {
+    subjectId: "biology",
+    dueDate: 5_000,
+    term: FIRST.term,
+    session: FIRST.session,
+    ...over,
+  };
+}
+
+function shelf(over: Partial<Parameters<typeof buildShelf>[0]> = {}) {
+  return buildShelf({
+    subjects: [{ id: "biology", name: "Biology" }],
+    lessons: [],
+    assignments: [],
+    submissions: [],
+    schemes: [],
+    filter: ALL_TERMS,
+    now: 1_000,
+    ...over,
+  });
+}
+
+test("a row with no term matches only the all filter", () => {
+  const undated = { term: null, session: null };
+  assert.equal(matchesTerm(undated, ALL_TERMS), true);
+  assert.equal(matchesTerm(undated, { kind: "pair", ...FIRST }), false);
+  assert.equal(isUndated(undated), true);
+});
+
+test("half a pair is not a pair", () => {
+  // "Second Term" alone spans every year the school has ever run.
+  const halfTerm = { term: "Second Term", session: null };
+  const halfSession = { term: null, session: "2025/2026" };
+  assert.equal(isUndated(halfTerm), true);
+  assert.equal(isUndated(halfSession), true);
+  assert.equal(matchesTerm(halfTerm, { kind: "pair", ...SECOND }), false);
+});
+
+test("term matching is exact, never normalised", () => {
+  // ResultPeak joins result sheets on the literal strings. A trimmed or
+  // case-folded value silently stops joining rather than erroring.
+  const row = { term: "First Term", session: "2025/2026" };
+  assert.equal(matchesTerm(row, { kind: "pair", term: "first term", session: "2025/2026" }), false);
+  assert.equal(matchesTerm(row, { kind: "pair", term: "First Term ", session: "2025/2026" }), false);
+  assert.equal(matchesTerm(row, { kind: "pair", term: "First Term", session: "2025/2026" }), true);
+});
+
+test("term options come from the student's own rows, newest session first", () => {
+  const rows = [
+    { term: "Second Term", session: "2025/2026" },
+    { term: "First Term", session: "2025/2026" },
+    { term: "First Term", session: "2025/2026" },
+    { term: "Third Term", session: "2024/2025" },
+    { term: null, session: null },
+  ];
+  const options = termOptions(rows, termOrder);
+  assert.deepEqual(
+    options.map((o) => `${o.session} ${o.term} x${o.count}`),
+    [
+      "2025/2026 First Term x2",
+      "2025/2026 Second Term x1",
+      "2024/2025 Third Term x1",
+    ]
+  );
+});
+
+test("a subject with an allocated tutor and no content still appears", () => {
+  // The whole reason the row set comes from the class's offering, not from the
+  // content: a child must not think the school dropped a subject.
+  const rows = shelf({ subjects: [{ id: "civic", name: "Civic Education" }] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].isEmpty, true);
+  assert.equal(rows[0].lessonCount, 0);
+});
+
+test("narrowing the filter empties a subject rather than removing it", () => {
+  const lessons = [shelfLesson({ lessonId: "l1", ...FIRST })];
+  const all = shelf({ lessons, filter: ALL_TERMS });
+  const second = shelf({ lessons, filter: { kind: "pair", ...SECOND } });
+  assert.equal(all[0].lessonCount, 1);
+  assert.equal(second.length, 1, "the row survives the filter");
+  assert.equal(second[0].lessonCount, 0);
+});
+
+test("due and overdue are counted from submissions, not from the clock alone", () => {
+  const assignments = [
+    shelfAssignment({ assignmentId: "a1", dueDate: 500 }), // past
+    shelfAssignment({ assignmentId: "a2", dueDate: 9_000 }), // future
+    shelfAssignment({ assignmentId: "a3", dueDate: 500 }), // past, but sent
+  ];
+  const submissions = [
+    { assignmentId: "a3", subjectId: "biology", isFinalised: false, finalScorePercent: null },
+  ];
+  const rows = shelf({ assignments, submissions, now: 1_000 });
+  assert.equal(rows[0].overdueCount, 1, "a1 only - a3 was submitted");
+  assert.equal(rows[0].dueCount, 1);
+});
+
+test("a submission is filtered through its assignment's term, not its own", () => {
+  // Submissions carry no term here. Matching them any other way would count one
+  // whose assignment fell outside the filter.
+  const assignments = [shelfAssignment({ assignmentId: "a1", ...SECOND })];
+  const submissions = [
+    { assignmentId: "a1", subjectId: "biology", isFinalised: true, finalScorePercent: 80 },
+  ];
+  const inTerm = shelf({ assignments, submissions, filter: { kind: "pair", ...SECOND } });
+  const outOfTerm = shelf({ assignments, submissions, filter: { kind: "pair", ...FIRST } });
+  assert.equal(inTerm[0].markedCount, 1);
+  assert.equal(inTerm[0].averagePercent, 80);
+  assert.equal(outOfTerm[0].markedCount, 0);
+  assert.equal(outOfTerm[0].averagePercent, null);
+});
+
+test("only finalised marks reach the average", () => {
+  const assignments = [
+    shelfAssignment({ assignmentId: "a1" }),
+    shelfAssignment({ assignmentId: "a2" }),
+  ];
+  const submissions = [
+    { assignmentId: "a1", subjectId: "biology", isFinalised: true, finalScorePercent: 90 },
+    // AI-graded but not released. A student must never see this number.
+    { assignmentId: "a2", subjectId: "biology", isFinalised: false, finalScorePercent: null },
+  ];
+  const rows = shelf({ assignments, submissions });
+  assert.equal(rows[0].averagePercent, 90, "not 45 - the unreleased one is not a zero");
+});
+
+test("no released marks means null, never zero", () => {
+  // Zero is a mark a child can be given. Null is "nothing has come back yet",
+  // and the two must not render the same.
+  assert.equal(shelf()[0].averagePercent, null);
+});
+
+test("subjects needing attention sort above subjects that are merely full", () => {
+  const rows = buildShelf({
+    subjects: [
+      { id: "art", name: "Art" },
+      { id: "biology", name: "Biology" },
+      { id: "civic", name: "Civic Education" },
+    ],
+    lessons: [shelfLesson({ lessonId: "l1", subjectId: "art" })],
+    assignments: [shelfAssignment({ assignmentId: "a1", subjectId: "biology", dueDate: 500 })],
+    submissions: [],
+    schemes: [],
+    filter: ALL_TERMS,
+    now: 1_000,
+  });
+  assert.deepEqual(
+    rows.map((r) => r.subjectId),
+    ["biology", "art", "civic"],
+    "overdue first, then content, then empty"
+  );
+});
+
+test("totals are summed from the shelf, not recomputed", () => {
+  const rows = buildShelf({
+    subjects: [
+      { id: "art", name: "Art" },
+      { id: "biology", name: "Biology" },
+    ],
+    lessons: [
+      shelfLesson({ lessonId: "l1", subjectId: "art" }),
+      shelfLesson({ lessonId: "l2", subjectId: "biology" }),
+    ],
+    assignments: [
+      shelfAssignment({ assignmentId: "a1", subjectId: "art", dueDate: 9_000 }),
+      shelfAssignment({ assignmentId: "a2", subjectId: "biology", dueDate: 500 }),
+    ],
+    submissions: [],
+    schemes: [],
+    filter: ALL_TERMS,
+    now: 1_000,
+  });
+  const totals = shelfTotals(rows);
+  assert.equal(totals.due, 1);
+  assert.equal(totals.overdue, 1);
+  assert.equal(totals.lessons, 2);
+  assert.equal(totals.subjectsWithWork, 2);
+});
+
+// ---------------------------------------------------------------------------
 // Module boundary: the pure modules stay pure
 // ---------------------------------------------------------------------------
 
@@ -1233,6 +1701,17 @@ const PURE_MODULES = [
   // Reached as a value import by projection.ts, so it must be held to the rules
   // too or that import would not be legal.
   "src/lib/storage/file-types.ts",
+  // Announcement visibility and read state. Pure because two of its rules are
+  // easy to break and impossible to notice: a staff-only notice must never reach
+  // a child, and the read watermark must never advance past something nobody
+  // dismissed - which would silently delete the "stays until read" behaviour
+  // that is the whole feature.
+  "src/lib/announcements/notices.ts",
+  // The subject shelf. Pure because a term filter that silently drops a lesson
+  // is the exact failure the byte-for-byte term rules exist to prevent, and
+  // because the same function runs on the server AND on the device - two copies
+  // would let an offline shelf and an online one disagree about a child's marks.
+  "src/lib/shelf/build.ts",
 ];
 
 /** Never importable, as a type or otherwise. */
@@ -1750,14 +2229,21 @@ test("the diagnostic scan rejects what it exists to reject", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The risk in this feature is not that a check is too loose. It is that a check
- * is too tight on a tutor ResultPeak has not allocated yet - most of them, for
- * a while - and locks a working account out on deploy. Nearly every case below
- * is about that direction.
+ * THERE ARE TWO SWITCHES AND FOUR ROWS. The school's `subjectAllocation` flag
+ * decides whether subject checks apply at all; the tutor's own allocation
+ * decides what passes once they do. Collapsing them into one test gets two rows
+ * wrong in opposite directions, so every case below names the row it covers:
+ *
+ *   flag off + no allocation   -> allow    (every school in the project today)
+ *   flag off + allocated       -> ALLOW    (pickers narrow; routes must not refuse)
+ *   flag on  + allocated       -> check the pair
+ *   flag on  + no allocation   -> REFUSE   (not "allow everything")
+ *
+ * The risk is not that a check is too loose. It is that a check is too tight on
+ * a tutor nobody has allocated yet and locks a working account out on deploy.
  */
 
-const ALLOCATED: SubjectAllocation = {
-  isAdmin: false,
+const PAIRS = {
   assignedSubjects: ["mathematics", "further_mathematics"],
   subjectClasses: {
     mathematics: ["jss1a", "jss2a"],
@@ -1765,70 +2251,130 @@ const ALLOCATED: SubjectAllocation = {
   },
 };
 
+/** Row 2. Allocated, school has not switched enforcement on. Every backfilled tutor today. */
+const ALLOCATED_OFF: SubjectAllocation = {
+  isAdmin: false,
+  ...PAIRS,
+  subjectAllocationEnforced: false,
+};
+
+/** Row 3. Allocated, enforcement on. The only row that checks a pair. */
+const ALLOCATED_ON: SubjectAllocation = {
+  isAdmin: false,
+  ...PAIRS,
+  subjectAllocationEnforced: true,
+};
+
+/** Row 1. No allocation, enforcement off. Every school in the project today. */
 const LEGACY: SubjectAllocation = {
   isAdmin: false,
   assignedSubjects: [],
   subjectClasses: {},
+  subjectAllocationEnforced: false,
 };
 
-test("an unallocated tutor passes every subject check", () => {
+/** Row 4. No allocation, enforcement ON - the row the flag exists to express. */
+const AWAITING: SubjectAllocation = { ...LEGACY, subjectAllocationEnforced: true };
+
+test("row 1: no allocation and no enforcement passes every subject check", () => {
   assert.equal(isUnallocated(LEGACY), true);
   assert.equal(teachesSubjectInClass(LEGACY, "jss1a", "mathematics"), true);
   assert.equal(teachesSubjectInClass(LEGACY, "ss3b", "civic_education"), true);
   assert.equal(teachesSubject(LEGACY, "anything_at_all"), true);
+  assert.equal(isAwaitingAllocation(LEGACY), false);
 });
 
-test("a half-derived profile still counts as unallocated", () => {
+test("row 2: an allocated tutor is NOT refused while their school has enforcement off", () => {
+  // The trap. Allocation alone must never start refusing: narrowing a picker is
+  // a convenience a school gets by allocating its tutors, and it must not turn
+  // into a rejection nobody switched on. Every backfilled tutor is in this row.
+  assert.equal(isUnallocated(ALLOCATED_OFF), false);
+  assert.equal(teachesSubjectInClass(ALLOCATED_OFF, "jss1a", "mathematics"), true);
+  // The pair they do NOT hold - still allowed, because the school has not opted in.
+  assert.equal(teachesSubjectInClass(ALLOCATED_OFF, "ss1a", "mathematics"), true);
+  assert.equal(teachesSubjectInClass(ALLOCATED_OFF, "ss3b", "english"), true);
+  assert.equal(teachesSubject(ALLOCATED_OFF, "english"), true);
+  assert.equal(isAwaitingAllocation(ALLOCATED_OFF), false);
+});
+
+test("row 3: an allocated tutor under enforcement is held to their own pairs", () => {
+  assert.equal(teachesSubjectInClass(ALLOCATED_ON, "jss1a", "mathematics"), true);
+  assert.equal(teachesSubjectInClass(ALLOCATED_ON, "ss1a", "further_mathematics"), true);
+
+  // Right subject, wrong class.
+  assert.equal(teachesSubjectInClass(ALLOCATED_ON, "ss1a", "mathematics"), false);
+  // Right class, wrong subject - the case that used to expose a marking guide.
+  assert.equal(teachesSubjectInClass(ALLOCATED_ON, "jss1a", "english"), false);
+  // Neither.
+  assert.equal(teachesSubjectInClass(ALLOCATED_ON, "ss3b", "english"), false);
+  assert.equal(isAwaitingAllocation(ALLOCATED_ON), false);
+});
+
+test("row 4: enforcement with no allocation refuses everything, and does not allow everything", () => {
+  // The whole reason the flag exists. Without it this state is indistinguishable
+  // from a school that predates the feature, and reading it as "unrestricted"
+  // would let a tutor nobody has allocated hold the entire school.
+  assert.equal(isUnallocated(AWAITING), true);
+  assert.equal(teachesSubjectInClass(AWAITING, "jss1a", "mathematics"), false);
+  assert.equal(teachesSubjectInClass(AWAITING, "ss3b", "civic_education"), false);
+  assert.equal(teachesSubject(AWAITING, "anything_at_all"), false);
+  // And it is reported as its own state, so a picker renders an empty state
+  // naming the fix rather than a full subject list that cannot submit.
+  assert.equal(isAwaitingAllocation(AWAITING), true);
+});
+
+test("a half-derived profile counts as unallocated, and fails CLOSED under enforcement", () => {
   // ResultPeak writes `assignments` first and derives the rest. A profile caught
-  // between the two must fall back to today's behaviour, not fail every lookup
-  // against an empty map. Both directions of the disagreement.
-  const subjectsOnly: SubjectAllocation = {
-    isAdmin: false,
-    assignedSubjects: ["mathematics"],
-    subjectClasses: {},
-  };
-  const mapOnly: SubjectAllocation = {
+  // between the two reads as unallocated on both fields the checks use, rather
+  // than as two disagreeing states. Both directions of the disagreement.
+  const subjectsOnly = { isAdmin: false, assignedSubjects: ["mathematics"], subjectClasses: {} };
+  const mapOnly = {
     isAdmin: false,
     assignedSubjects: [],
     subjectClasses: { mathematics: ["jss1a"] },
   };
 
-  assert.equal(isUnallocated(subjectsOnly), true);
-  assert.equal(isUnallocated(mapOnly), true);
-  // The point of the fallback: no lockout on a subject the map does not mention.
-  assert.equal(teachesSubjectInClass(subjectsOnly, "jss1a", "english"), true);
-  assert.equal(teachesSubjectInClass(mapOnly, "jss9z", "english"), true);
+  const offS: SubjectAllocation = { ...subjectsOnly, subjectAllocationEnforced: false };
+  const offM: SubjectAllocation = { ...mapOnly, subjectAllocationEnforced: false };
+  assert.equal(isUnallocated(offS), true);
+  assert.equal(isUnallocated(offM), true);
+  // Enforcement off: no lockout on a subject the map does not mention.
+  assert.equal(teachesSubjectInClass(offS, "jss1a", "english"), true);
+  assert.equal(teachesSubjectInClass(offM, "jss9z", "english"), true);
+
+  // Enforcement on: waits for the derive step rather than falling back to
+  // permissive. A deliberate decision - a stalled derive is a support call, not
+  // a silent widening - which makes ResultPeak's derive step load-bearing.
+  const onS: SubjectAllocation = { ...subjectsOnly, subjectAllocationEnforced: true };
+  const onM: SubjectAllocation = { ...mapOnly, subjectAllocationEnforced: true };
+  assert.equal(isAwaitingAllocation(onS), true);
+  assert.equal(isAwaitingAllocation(onM), true);
+  // Even the pair the half-written half of the profile does name.
+  assert.equal(teachesSubjectInClass(onS, "jss1a", "mathematics"), false);
+  assert.equal(teachesSubjectInClass(onM, "jss1a", "mathematics"), false);
 });
 
-test("an admin is unrestricted, as they are for assignedClasses", () => {
-  const admin: SubjectAllocation = { ...ALLOCATED, isAdmin: true };
-  assert.equal(teachesSubjectInClass(admin, "ss3b", "civic_education"), true);
-  assert.equal(teachesSubject(admin, "civic_education"), true);
-});
-
-test("an allocated tutor is held to their own pairs", () => {
-  assert.equal(isUnallocated(ALLOCATED), false);
-  assert.equal(teachesSubjectInClass(ALLOCATED, "jss1a", "mathematics"), true);
-  assert.equal(teachesSubjectInClass(ALLOCATED, "ss1a", "further_mathematics"), true);
-
-  // Right subject, wrong class.
-  assert.equal(teachesSubjectInClass(ALLOCATED, "ss1a", "mathematics"), false);
-  // Right class, wrong subject - the case that used to expose a marking guide.
-  assert.equal(teachesSubjectInClass(ALLOCATED, "jss1a", "english"), false);
-  // Neither.
-  assert.equal(teachesSubjectInClass(ALLOCATED, "ss3b", "english"), false);
+test("an admin is unrestricted in every row, as they are for assignedClasses", () => {
+  for (const base of [ALLOCATED_OFF, ALLOCATED_ON, LEGACY, AWAITING]) {
+    const admin: SubjectAllocation = { ...base, isAdmin: true };
+    assert.equal(teachesSubjectInClass(admin, "ss3b", "civic_education"), true);
+    assert.equal(teachesSubject(admin, "civic_education"), true);
+    // An admin is never "awaiting allocation" - they would see an empty state
+    // for a restriction that does not apply to them.
+    assert.equal(isAwaitingAllocation(admin), false);
+  }
 });
 
 test("teachesSubject ignores the class, for the topics route", () => {
   // POST /api/topics has no classId at all: a topic is (subject, level, term).
-  assert.equal(teachesSubject(ALLOCATED, "mathematics"), true);
-  assert.equal(teachesSubject(ALLOCATED, "further_mathematics"), true);
-  assert.equal(teachesSubject(ALLOCATED, "english"), false);
+  assert.equal(teachesSubject(ALLOCATED_ON, "mathematics"), true);
+  assert.equal(teachesSubject(ALLOCATED_ON, "further_mathematics"), true);
+  assert.equal(teachesSubject(ALLOCATED_ON, "english"), false);
 });
 
 test("teachableMap narrows to real subjects and held classes", () => {
   const map = teachableMap(
-    ALLOCATED,
+    ALLOCATED_ON,
     ["mathematics", "further_mathematics", "english"],
     ["jss1a", "jss2a", "ss1a"]
   );
@@ -1838,15 +2384,28 @@ test("teachableMap narrows to real subjects and held classes", () => {
   });
 
   // A subject removed in ResultPeak drops out rather than offering a dead option.
-  assert.deepEqual(teachableMap(ALLOCATED, ["mathematics"], ["jss1a", "jss2a", "ss1a"]), {
+  assert.deepEqual(teachableMap(ALLOCATED_ON, ["mathematics"], ["jss1a", "jss2a", "ss1a"]), {
     mathematics: ["jss1a", "jss2a"],
   });
 
   // A class the tutor no longer holds drops out, and a subject left with no
   // usable class disappears entirely.
   assert.deepEqual(
-    teachableMap(ALLOCATED, ["mathematics", "further_mathematics"], ["jss1a"]),
+    teachableMap(ALLOCATED_ON, ["mathematics", "further_mathematics"], ["jss1a"]),
     { mathematics: ["jss1a"] }
+  );
+});
+
+test("teachableMap narrows the same way whether or not enforcement is on", () => {
+  // The deliberate asymmetry with the checks above: a picker narrows as soon as
+  // ResultPeak has allocated a tutor, because showing a teacher 36 subjects they
+  // do not teach is the complaint this feature exists to fix, and that does not
+  // become worth fixing only when a flag flips.
+  const subjects = ["mathematics", "further_mathematics", "english"];
+  const classes = ["jss1a", "jss2a", "ss1a"];
+  assert.deepEqual(
+    teachableMap(ALLOCATED_OFF, subjects, classes),
+    teachableMap(ALLOCATED_ON, subjects, classes)
   );
 });
 
@@ -1855,9 +2414,15 @@ test("teachableMap returns the empty map for the no-restriction cases", () => {
   // a partially-built map that a picker would treat as a restriction.
   assert.deepEqual(teachableMap(LEGACY, ["mathematics"], ["jss1a"]), {});
   assert.deepEqual(
-    teachableMap({ ...ALLOCATED, isAdmin: true }, ["mathematics"], ["jss1a"]),
+    teachableMap({ ...ALLOCATED_ON, isAdmin: true }, ["mathematics"], ["jss1a"]),
     {}
   );
+
+  // AND THE CASE `{}` CANNOT EXPRESS: row 4 returns the same empty map, which a
+  // picker would read as "offer everything" to a tutor who may author nothing.
+  // This is why pages must test isAwaitingAllocation() before reaching for it.
+  assert.deepEqual(teachableMap(AWAITING, ["mathematics"], ["jss1a"]), {});
+  assert.equal(isAwaitingAllocation(AWAITING), true);
 });
 
 test("the pickers narrow in both directions", () => {
