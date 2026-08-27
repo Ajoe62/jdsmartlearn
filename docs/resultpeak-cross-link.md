@@ -51,7 +51,8 @@ did.
 | ---- | ---- | ----------- |
 | `src/app/page.tsx` | "Open ResultPeak" | `/admin` |
 | `src/app/(tutor)/tutor/page.tsx` | "Results in ResultPeak" | `/admin/results` |
-| `src/app/(student)/student/page.tsx` | "Exams and results" | `/start` |
+| `src/app/(student)/student/page.tsx` | "Take an exam" | `/start` |
+| `src/app/(student)/student/page.tsx` | "see your results" | `/start/student?next=results` |
 
 **ResultPeak to JDSmartLearn** (the other repository)
 
@@ -77,8 +78,13 @@ student dashboard has only `session.schoolId`; `ResultPeakSchool` carries no
 `slug`, so producing one would mean a `getSchool()` call. That page is documented
 as costing no Firestore reads of its own, and the Spark quota is shared with a
 live paying school, so a read on every dashboard load of every student to save
-one tap is the wrong trade. Our student link goes to `/start` and the child taps
-once more.
+one tap is the wrong trade. Our student links go to `/start` and
+`/start/student`, and the child names their school one screen later.
+
+`?next=results` on the second link is a flag, not a destination. ResultPeak
+recognises only the literal value `results`; it titles the page "See your
+results" and opens the result sheet after sign-in rather than an exam picker.
+Nothing in it is a URL, so there is nothing there to redirect to.
 
 If that ever becomes worth fixing, the cheap way is for ResultPeak's `/s/{slug}`
 handler to be the only entry point that matters, not for this page to start

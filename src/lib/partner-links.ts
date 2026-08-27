@@ -62,3 +62,24 @@ export function resultPeakSchoolUrl(slug?: string | null): string {
   const clean = (slug ?? "").trim().toLowerCase();
   return clean ? resultPeakUrl(`/s/${encodeURIComponent(clean)}`) : resultPeakUrl("");
 }
+
+/**
+ * Where a child goes to read their own term result sheet.
+ *
+ * `/start/student` rather than `/start`, because ResultPeak's chooser asks
+ * enrolled student or entrance applicant, and a child arriving from here has a
+ * login already — the question is one card too many.
+ *
+ * `?next=results` is a flag, not a destination. ResultPeak recognises only the
+ * literal value "results"; it titles the page "See your results" and opens the
+ * result sheet after sign-in instead of an exam picker nobody asked for. Nothing
+ * here is a URL, so there is no open redirect to widen.
+ *
+ * No school in the path, for the reason in resultPeakSchoolUrl and in
+ * src/app/(student)/student/page.tsx: the session carries schoolId, not the
+ * slug, and resolving one would add a Firestore read to every dashboard load of
+ * every student to save a single tap.
+ */
+export function resultPeakStudentResultsUrl(): string {
+  return resultPeakUrl("/start/student?next=results");
+}

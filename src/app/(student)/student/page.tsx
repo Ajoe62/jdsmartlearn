@@ -7,7 +7,7 @@ import { toNoticeItem, visibleToStudent } from "@/lib/announcements/notices";
 import Announcements from "@/components/student/Announcements";
 import DashboardView from "@/components/student/DashboardView";
 import SubjectShelfView from "@/components/student/SubjectShelfView";
-import { resultPeakUrl } from "@/lib/partner-links";
+import { resultPeakStudentResultsUrl, resultPeakUrl } from "@/lib/partner-links";
 
 /**
  * Student portal - read only. Server-rendered on the first visit (a cheap phone
@@ -37,11 +37,15 @@ export default async function StudentHome() {
     toNoticeItem
   );
 
-  // The portal chooser, NOT /s/{slug}. The deep link would need the school's
-  // slug, the session carries only its id, and looking one up would put another
-  // Firestore read on every dashboard load of every student to save one tap.
+  // Two errands, so two links: sitting an exam and reading a result sheet.
+  //
+  // Neither carries the school. Both are the portal chooser or the sign-in page,
+  // NOT /s/{slug}: the deep link would need the school's slug, the session
+  // carries only its id, and looking one up would put another Firestore read on
+  // every dashboard load of every student to save one tap.
   // See src/lib/partner-links.ts.
   const examsUrl = resultPeakUrl("/start");
+  const resultsUrl = resultPeakStudentResultsUrl();
 
   return (
     <>
@@ -57,7 +61,7 @@ export default async function StudentHome() {
           />
         }
       />
-      {examsUrl && (
+      {examsUrl && resultsUrl && (
         <p className="mx-auto max-w-app px-5 pb-10 text-sm text-muted">
           <a
             className="underline"
@@ -65,9 +69,18 @@ export default async function StudentHome() {
             rel="noopener noreferrer"
             target="_blank"
           >
-            Exams and results
+            Take an exam
           </a>{" "}
-          are in ResultPeak. Use the same username and access code.
+          or{" "}
+          <a
+            className="underline"
+            href={resultsUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            see your results
+          </a>{" "}
+          in ResultPeak. Use the same username and access code.
         </p>
       )}
     </>
