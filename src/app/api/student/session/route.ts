@@ -5,6 +5,8 @@ import {
   createStudentSession,
   clearStudentSession,
   rememberSchool,
+  getPinnedSchoolId,
+  unpinSchool,
 } from "@/lib/auth/student";
 import { isThrottled, recordFailure, recordSuccess } from "@/lib/auth/throttle";
 
@@ -68,6 +70,18 @@ export async function POST(req: Request) {
   // Remember the SCHOOL on this phone so the next child skips the picker.
   // Never the username: phones are shared, and it would grant nothing anyway.
   await rememberSchool(session.schoolId);
+
+  /**
+   * A device pinned by one school's link has just signed a child in to a
+   * DIFFERENT school. Release the pin.
+   *
+   * This is what keeps ?school=change from being a one-way door. The pin
+   * suppresses the picker, so without this a transferring child would reach the
+   * picker once, sign in successfully, and find the old school pinned over them
+   * again on the next visit - with the escape hatch no longer shown anywhere.
+   */
+  const pinned = await getPinnedSchoolId();
+  if (pinned && pinned !== session.schoolId) await unpinSchool();
 
   return NextResponse.json({ ok: true });
 }

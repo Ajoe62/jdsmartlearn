@@ -178,10 +178,37 @@ export const getSchoolDirectory = unstable_cache(
   { revalidate: 21600 } // 6 hours
 );
 
-/** Resolve a /s/{slug} link. Null when unknown or ambiguous - fall back to the picker. */
-export async function findSchoolBySlug(slug: string): Promise<SchoolListing | null> {
-  const matches = (await getSchoolDirectory()).filter((s) => s.slug === slug);
-  return matches.length === 1 ? matches[0] : null;
+/**
+ * Resolve a /s/{...} link by slug OR by raw school id.
+ *
+ * Replaced findSchoolBySlug(). One resolver, not two: a second entry point that
+ * handled only slugs is how half the call sites keep the rename bug below.
+ *
+ * THE ID FORM IS NOT A CONVENIENCE, IT IS THE REPAIR FOR A SILENT FAILURE. The
+ * slug is computed from the school's NAME every time it is read (schoolSlug
+ * above), and nothing stores it. So the day an admin fixes a typo in their own
+ * school name, every link that school has printed on a board, put on its
+ * website or sent to parents stops resolving - with no error anywhere, because
+ * an unknown slug is designed to fall through to the picker.
+ *
+ * A document id never changes, so /s/{schoolId} is a link that cannot rot. Both
+ * forms work; a school can print either. The real fix is a stored slug that
+ * ResultPeak owns - docs/resultpeak-school-branding-prompt.md, task 1 - and
+ * this stays afterwards regardless, because links already in circulation do not
+ * get recalled.
+ *
+ * Slug first: a slug is what a school is told to use, and an id that happened to
+ * look like a slug should not shadow one.
+ */
+export async function findSchool(value: string): Promise<SchoolListing | null> {
+  const directory = await getSchoolDirectory();
+
+  const bySlug = directory.filter((s) => s.slug === value.toLowerCase());
+  if (bySlug.length === 1) return bySlug[0];
+
+  // Case-sensitive: Firestore ids are, and a case-folded compare here would
+  // make two distinct ids collide.
+  return directory.find((s) => s.id === value) ?? null;
 }
 
 export async function getStudentsInClass(schoolId: string, classId: string) {

@@ -54,6 +54,27 @@ export default {
         warnSoft: "#FEF6E7",
         danger: "#B42318", // 6.24:1
         dangerSoft: "#FEF3F2",
+
+        /**
+         * The school's own colour, set per request by <SchoolTheme /> and
+         * falling back to brand indigo when a school has not chosen one.
+         *
+         * THESE THREE ARE NOT CHECKED BY scripts/check-contrast.ts, and they are
+         * the only tokens that cannot be: their value is a school's, not ours,
+         * and it is not known at build time. They are checked instead at the
+         * moment an admin saves, by assertBrandColour() in lib/branding/colour -
+         * which refuses anything under 4.5:1 - and that same function is
+         * exercised in CI. Do not add them to the PAIRS list; the literal
+         * `var(...)` string is not a hex value and the arithmetic there would
+         * produce a meaningless number.
+         *
+         * `schoolFg` is COMPUTED from `schoolBg`, never chosen, so the pair is
+         * safe by construction. `schoolQuiet` is a fill and must never sit
+         * behind text - the same rule `accent` and `success` live under.
+         */
+        schoolBg: "var(--school-bg, #3852D6)",
+        schoolFg: "var(--school-fg, #FFFFFF)",
+        schoolQuiet: "var(--school-quiet, #EEF1FD)",
       },
 
       fontFamily: {

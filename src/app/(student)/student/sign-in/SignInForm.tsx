@@ -12,11 +12,18 @@ import type { SchoolListing } from "@/lib/db/resultpeak";
 export default function SignInForm({
   schools,
   chosen,
+  pinned,
   expired,
 }: {
   schools: SchoolListing[];
   /** The school this phone already remembers, if any. */
   chosen: SchoolListing | null;
+  /**
+   * This device arrived through the school's own link, so the school is settled
+   * and NOT offered as a choice. The route out still exists at
+   * ?school=change - it is simply not advertised here. See the page.
+   */
+  pinned: boolean;
   expired: boolean;
 }) {
   const router = useRouter();
@@ -68,12 +75,17 @@ export default function SignInForm({
         {chosen ? (
           <p className="flex items-center justify-between gap-3 rounded-lg bg-canvas px-3 py-2.5 text-sm">
             <span className="truncate font-medium">{chosen.name}</span>
-            <Link
-              href="/student/sign-in?school=change"
-              className="shrink-0 font-medium text-accentText"
-            >
-              Change school
-            </Link>
+            {/* No "Change school" on a device the school itself sent here. The
+                offer is what made the product read as somebody else's software
+                that happens to know several schools. */}
+            {!pinned && (
+              <Link
+                href="/student/sign-in?school=change"
+                className="shrink-0 font-medium text-accentText"
+              >
+                Change school
+              </Link>
+            )}
           </p>
         ) : (
           <Field label="Your school" htmlFor="school">

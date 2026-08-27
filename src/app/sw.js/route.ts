@@ -47,6 +47,20 @@ function denied(url, request) {
   if (url.pathname.startsWith("/api/lessons")) {
     return !/^\\/api\\/lessons\\/[^/]+\\/file$/.test(url.pathname);
   }
+  /**
+   * A school's crest is allowed, and nothing else under /api/schools.
+   *
+   * Safe here by the same argument as a scheme of work: it has no marking guide
+   * and no field one could occupy. It is a logo a school prints on a uniform,
+   * it carries no student data, and it must render with no network or the
+   * offline header falls back to a monogram on every dead link.
+   *
+   * Matched narrowly rather than by prefix - the exact route shape only - so a
+   * future /api/schools/{id}/anything does not inherit this allowance.
+   */
+  if (url.pathname.startsWith("/api/schools")) {
+    return !/^\\/api\\/schools\\/[^/]+\\/logo$/.test(url.pathname);
+  }
   return false;
 }
 
@@ -167,6 +181,20 @@ self.addEventListener("fetch", (event) => {
   // Saved original files, explicitly opted into by the student.
   if (/^\\/api\\/lessons\\/[^/]+\\/file$/.test(url.pathname)) {
     event.respondWith(cacheFirst(request, FILES));
+    return;
+  }
+
+  /**
+   * The school crest. Cache-first on the FULL URL including its ?v=, which is
+   * why a re-upload lands immediately: the server versions the URL and serves
+   * the bytes immutable, so a new crest is simply a key this cache has never
+   * seen. Nothing is ever stale and nothing needs invalidating.
+   *
+   * In SHELL rather than FILES so it is dropped with the rest of the chrome when
+   * a student signs out or a different one signs in.
+   */
+  if (/^\\/api\\/schools\\/[^/]+\\/logo$/.test(url.pathname)) {
+    event.respondWith(cacheFirst(request, SHELL));
     return;
   }
 

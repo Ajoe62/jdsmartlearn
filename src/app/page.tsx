@@ -1,8 +1,145 @@
+import type { Metadata } from "next";
 import { CardLink } from "@/components/ui/Card";
+import SchoolMark from "@/components/ui/SchoolMark";
 import Wordmark from "@/components/ui/Wordmark";
-import { resultPeakStaffUrl } from "@/lib/partner-links";
+import { getBrandingSchoolId } from "@/lib/auth/student";
+import { getSchoolBrand, type SchoolBrand } from "@/lib/branding/school";
+import { resultPeakSchoolUrl, resultPeakStaffUrl } from "@/lib/partner-links";
 
-export default function Home() {
+/**
+ * Two front doors in one route.
+ *
+ * A visitor who arrived through their school's own link (/s/{slug}) gets THAT
+ * SCHOOL'S front door: its crest, its name as the headline, and a door for each
+ * audience. Everyone else gets the product's front door.
+ *
+ * Landing the school link here rather than on a page of its own is what makes a
+ * bookmark survive. A parent who saves the page they were sent keeps the school;
+ * a route that only branded /s/{slug} would drop it the moment anybody typed the
+ * bare domain.
+ */
+
+export async function generateMetadata(): Promise<Metadata> {
+  const brand = await pinnedBrand();
+  return brand
+    ? { title: brand.name, description: `Lessons and schoolwork for ${brand.name}.` }
+    : {};
+}
+
+async function pinnedBrand() {
+  const schoolId = await getBrandingSchoolId();
+  return schoolId ? await getSchoolBrand(schoolId) : null;
+}
+
+export default async function Home() {
+  const brand = await pinnedBrand();
+  return brand ? <SchoolDoor brand={brand} /> : <ProductDoor />;
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The school's own front door.
+ *
+ * Reads as the school's page, not as ours: crest and school name first, the two
+ * audience doors, then the school's results service, then one quiet line saying
+ * who built it. "JDSmartLearn" appears exactly once, at the bottom.
+ */
+function SchoolDoor({ brand }: { brand: SchoolBrand }) {
+  /**
+   * "" when ResultPeak is not configured, and then the row is not rendered at
+   * all. See src/lib/partner-links.ts for why there is no third state.
+   */
+  const results = resultPeakSchoolUrl(brand.slug);
+
+  return (
+    <div className="min-h-dvh">
+      <main className="mx-auto max-w-app px-5 py-12 sm:py-16">
+        <div className="flex items-center gap-4">
+          <SchoolMark brand={brand} size="lg" />
+          <div className="min-w-0">
+            <h1 className="text-title leading-tight">{brand.name}</h1>
+            <p className="mt-1 text-sm text-muted">Lessons and schoolwork</p>
+          </div>
+        </div>
+
+        <div className="mt-10 grid gap-4 sm:grid-cols-2">
+          <CardLink href="/student" className="group">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-successSoft text-successText">
+              <StudentIcon />
+            </span>
+            <span className="mt-4 block text-subheading font-semibold">
+              I&rsquo;m a student
+            </span>
+            <span className="mt-1 block text-sm text-muted">
+              Read your lessons and answer your work, with or without internet.
+            </span>
+            <span className="mt-3 block text-sm font-medium text-accentText">
+              Open my lessons <Arrow />
+            </span>
+          </CardLink>
+
+          {/* Staff get a door of their own here, which they never had. Both
+              audiences arrive on the same school link, and before this the link
+              sent everyone to the child's sign-in form. */}
+          <CardLink href="/tutor" className="group">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brandSoft text-brand">
+              <TeacherIcon />
+            </span>
+            <span className="mt-4 block text-subheading font-semibold">
+              I&rsquo;m a teacher or admin
+            </span>
+            <span className="mt-1 block text-sm text-muted">
+              Upload a lesson and publish a study guide to your class.
+            </span>
+            <span className="mt-3 block text-sm font-medium text-brand">
+              Start a lesson <Arrow />
+            </span>
+          </CardLink>
+        </div>
+
+        {results && (
+          <section className="mt-12 border-t border-line pt-8">
+            {/* Framed as the school's own second service, not as another
+                company's product. Same link as before; the words are the whole
+                change, and they are most of what stops this reading as a
+                hand-off to a third party. */}
+            <h2 className="text-eyebrow font-semibold uppercase text-muted">
+              Also from {brand.shortName}
+            </h2>
+            <a
+              className="group mt-3 flex items-center justify-between gap-4 rounded-xl border border-line bg-surface p-4 shadow-card transition-all hover:border-lineStrong hover:shadow-lift"
+              href={results}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <span className="min-w-0">
+                <span className="block font-display text-subheading font-semibold">
+                  Results and report cards
+                </span>
+                <span className="mt-0.5 block text-sm text-muted">
+                  Exam scores and end-of-term reports.
+                </span>
+              </span>
+              <span className="shrink-0 text-sm font-medium text-accentText">
+                Open <Arrow />
+              </span>
+            </a>
+          </section>
+        )}
+      </main>
+
+      <footer className="mx-auto max-w-app px-5 pb-12 text-sm text-muted">
+        Lessons by JDSmartLearn, an Ilumotech product
+      </footer>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/** The product's front door: nobody has told us which school this is. */
+function ProductDoor() {
   // "" when ResultPeak is not configured, and then the row below is not rendered
   // at all. See src/lib/partner-links.ts for why there is no third state.
   const resultPeak = resultPeakStaffUrl();

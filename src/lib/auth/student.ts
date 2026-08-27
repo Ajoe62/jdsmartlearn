@@ -32,6 +32,31 @@ const REFRESH_COOKIE = "jd_student_r";
  */
 export const SCHOOL_COOKIE = "jd_school";
 
+/**
+ * The school this device was PINNED to by the school's own link (/s/{slug}),
+ * holding that schoolId - not a boolean.
+ *
+ * SCHOOL_COOKIE above answers "which school did this phone last use", and is set
+ * by the picker as well as by the link. This answers a different question: "did
+ * the school itself send this person here". Only the second may suppress the
+ * picker, so the two cannot be one cookie.
+ *
+ *   pinned      -> arrived through the school's link. No picker, no "Change
+ *                  school" link, in either audience. The device belongs to a
+ *                  school and offering to leave it is the brand risk.
+ *   remembered  -> chose from the picker. They may have chosen wrong, so
+ *                  "Change school" stays.
+ *
+ * Holds the id rather than a flag so a sign-in to a DIFFERENT school can detect
+ * the disagreement and unpin, which is what keeps ?school=change working for a
+ * child who genuinely transfers.
+ *
+ * NOT A CREDENTIAL, and it decorates PRE-AUTHENTICATION SCREENS ONLY. Any
+ * visitor can set it by opening /s/anything, so a signed-in surface must take
+ * schoolId from the session and never from here (docs/SCHOOL-BRANDING.md 6c).
+ */
+export const PINNED_COOKIE = "jd_school_pinned";
+
 export const schoolCookieOptions = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
@@ -189,7 +214,37 @@ export async function getRememberedSchoolId(): Promise<string | null> {
 }
 
 export async function forgetSchool(): Promise<void> {
-  (await cookies()).delete(SCHOOL_COOKIE);
+  const jar = await cookies();
+  jar.delete(SCHOOL_COOKIE);
+  jar.delete(PINNED_COOKIE);
+}
+
+/** The school this device was pinned to by a school link, or null. */
+export async function getPinnedSchoolId(): Promise<string | null> {
+  return (await cookies()).get(PINNED_COOKIE)?.value ?? null;
+}
+
+/**
+ * Release the pin when the device signs in to a different school.
+ *
+ * Without this a transferring child is stuck: the pin suppresses the picker, so
+ * the one route out is ?school=change, and signing in there would leave the old
+ * pin in place to suppress the picker again on the next visit.
+ */
+export async function unpinSchool(): Promise<void> {
+  (await cookies()).delete(PINNED_COOKIE);
+}
+
+/**
+ * Which school to DECORATE a pre-authentication screen with.
+ *
+ * The pin first, then whatever the phone last used. Both are attacker-supplied,
+ * which is fine for a public name and crest and is why getSchoolBrand() returns
+ * null for anything it cannot resolve. Never call this from a signed-in surface.
+ */
+export async function getBrandingSchoolId(): Promise<string | null> {
+  const jar = await cookies();
+  return jar.get(PINNED_COOKIE)?.value ?? jar.get(SCHOOL_COOKIE)?.value ?? null;
 }
 
 export async function clearStudentSession(): Promise<void> {

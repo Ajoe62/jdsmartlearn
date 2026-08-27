@@ -1,4 +1,4 @@
-import { getRememberedSchoolId } from "@/lib/auth/student";
+import { getPinnedSchoolId, getRememberedSchoolId } from "@/lib/auth/student";
 import { getSchoolDirectory } from "@/lib/db/resultpeak";
 import SignInForm from "./SignInForm";
 
@@ -16,21 +16,34 @@ export default async function StudentSignInPage({
   searchParams: Promise<{ expired?: string; school?: string }>;
 }) {
   const params = await searchParams;
-  const [schools, remembered] = await Promise.all([
+  const [schools, remembered, pinnedId] = await Promise.all([
     getSchoolDirectory(),
     getRememberedSchoolId(),
+    getPinnedSchoolId(),
   ]);
 
   // ?school=change re-opens the picker on a phone that already remembers one.
-  const chosen =
-    params.school === "change"
-      ? null
-      : (schools.find((s) => s.id === remembered) ?? null);
+  //
+  // IT STILL WORKS ON A PINNED DEVICE, deliberately. The link is no longer shown
+  // there - offering to leave the school is the brand risk this work removes -
+  // but a child who genuinely transfers, or a phone handed between two schools,
+  // must not be stranded with no way back. Stop advertising the escape hatch; do
+  // not remove it. Signing in to a different school then releases the pin, in
+  // /api/student/session.
+  const wantsChange = params.school === "change";
+
+  const chosen = wantsChange
+    ? null
+    : (schools.find((s) => s.id === remembered) ?? null);
 
   return (
     <SignInForm
       schools={schools}
       chosen={chosen}
+      // Pinned only when the school's OWN link put this device here and it still
+      // agrees with what the phone remembers. A stale pin for some other school
+      // must not silently suppress the picker.
+      pinned={!wantsChange && !!chosen && chosen.id === pinnedId}
       expired={params.expired === "1"}
     />
   );

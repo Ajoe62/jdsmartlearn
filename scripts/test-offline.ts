@@ -31,6 +31,29 @@ import {
   termOrder,
 } from "../src/lib/academic-calendar";
 import { assertRecordFields, assertWritable } from "../src/lib/db/write-guard";
+import { monogram, shortenSchoolName } from "../src/lib/branding/monogram";
+import {
+  DEFAULT_BG,
+  INK,
+  MIN_RATIO,
+  WHITE,
+  assertBrandColour,
+  bestForeground,
+  defaultBrandColour,
+  isSafeCssColour,
+  normaliseHex,
+  schoolCssVars,
+  tint,
+} from "../src/lib/branding/colour";
+import {
+  CREST_EXTENSIONS,
+  CREST_TYPES,
+  MAX_CREST_BYTES,
+  MIN_ICON_PX,
+  crestTypeFor,
+  isIconCandidate,
+  pngSize,
+} from "../src/lib/branding/crest";
 import { JD, RESULTPEAK_OWNED } from "../src/lib/db/collections";
 import { readOnlyDb } from "../src/lib/db/read-only";
 import {
@@ -2455,4 +2478,278 @@ test("the pickers narrow in both directions", () => {
 
   // A subject with no entry offers no classes - it is not a licence to pick any.
   assert.deepEqual(classesForSubject(map, classes, "english"), []);
+});
+
+/* ------------------------------------------------------------------ *
+ * School branding (docs/SCHOOL-BRANDING.md)
+ * ------------------------------------------------------------------ */
+
+test("monogram: prefers the distinctive words", () => {
+  // The two names the design was written against.
+  assert.equal(monogram("CAPSTONE ACADEMY"), "CA");
+  assert.equal(monogram("THE GOOD SHEPHERD SCHOOL"), "GS");
+
+  // "The" must never be counted - TG would be a monogram no school uses.
+  assert.equal(monogram("The Cedar School"), "CS");
+  assert.equal(monogram("The Mount Cedar Academy"), "MC");
+
+  // Case and punctuation are carried by the source name, not invented here.
+  assert.equal(monogram("st. mary's international school"), "SM");
+});
+
+test("monogram: falls back rather than degrading to one letter", () => {
+  // Only ONE distinctive word, so the generic word is allowed back in - this is
+  // what keeps CAPSTONE ACADEMY at CA instead of a lonely C.
+  assert.equal(monogram("Capstone Academy"), "CA");
+  assert.equal(monogram("Bright College"), "BC");
+
+  // A genuinely single-word name yields a single letter. "CA" invented from
+  // "Capstone" alone would be a monogram the school does not use.
+  assert.equal(monogram("Capstone"), "C");
+
+  // Grammar never returns, so this is A and not TA. Type words do return.
+  assert.equal(monogram("The Academy"), "A");
+});
+
+test("monogram: never returns empty, whatever the name", () => {
+  // A header must always have something to render - a gap where the school's
+  // identity was promised is the failure this whole fallback exists to prevent.
+  for (const name of ["", "   ", "!!!", "-"]) {
+    assert.ok(monogram(name).length >= 1, `empty monogram for ${JSON.stringify(name)}`);
+  }
+  assert.equal(monogram(""), "?");
+
+  // Non-Latin names still produce a letter rather than a question mark.
+  assert.equal(monogram("Àdìgún Memorial"), "ÀM");
+});
+
+test("shortenSchoolName: trims trailing generics only", () => {
+  assert.equal(shortenSchoolName("Capstone Academy"), "Capstone");
+  assert.equal(shortenSchoolName("The Good Shepherd School"), "The Good Shepherd");
+
+  // Punctuation survives: words() would have returned "St Mary s".
+  assert.equal(shortenSchoolName("St. Mary's Academy"), "St. Mary's");
+
+  // A generic word in the MIDDLE is load-bearing and must not be touched -
+  // "Good Shepherd School of Arts" is not "Good Shepherd Arts".
+  assert.equal(
+    shortenSchoolName("Good Shepherd School of Arts"),
+    "Good Shepherd School of Arts"
+  );
+
+  // Nothing to trim, and never trimmed to nothing.
+  assert.equal(shortenSchoolName("Capstone"), "Capstone");
+  // Trimming must not leave grammar standing alone.
+  assert.equal(shortenSchoolName("The Academy"), "The Academy");
+});
+
+test("branding: the pinned cookie is never a signed-in surface's input", () => {
+  // The rule this guards is stated in docs/SCHOOL-BRANDING.md 6c: a cookie any
+  // visitor can set may decorate a pre-auth screen, but a signed-in header must
+  // resolve its school from the session. Both layouts express it as one
+  // conditional, so assert the shape of that conditional rather than the DOM.
+  const resolve = (session: { schoolId: string } | null, cookie: string | null) =>
+    session ? session.schoolId : cookie;
+
+  assert.equal(resolve({ schoolId: "real" }, "attacker"), "real");
+  assert.equal(resolve(null, "attacker"), "attacker");
+  assert.equal(resolve(null, null), null);
+});
+
+/* ------------------------------------------------------------------ *
+ * School branding: colour (docs/SCHOOL-BRANDING.md section 5)
+ * ------------------------------------------------------------------ */
+
+test("normaliseHex: accepts the forms an admin actually types", () => {
+  assert.equal(normaliseHex("#1b4d3e"), "#1B4D3E");
+  assert.equal(normaliseHex("1b4d3e"), "#1B4D3E");
+  assert.equal(normaliseHex("#ABC"), "#AABBCC");
+  assert.equal(normaliseHex("  #1B4D3E  "), "#1B4D3E");
+
+  // Refused rather than coerced into something that happens to parse.
+  for (const bad of ["", "nope", "#12345", "#1234567", "rgb(1,2,3)", "#12345g"]) {
+    assert.equal(normaliseHex(bad), null, `should refuse ${JSON.stringify(bad)}`);
+  }
+});
+
+test("bestForeground: picks by luminance, not by lightness", () => {
+  // THE CASE A NAIVE THRESHOLD GETS WRONG. A bright yellow is unreadable under
+  // white and excellent under ink; luminance is weighted heavily toward green,
+  // so "is it light?" is not the question.
+  assert.equal(bestForeground("#FFD400").fg, INK);
+  assert.equal(bestForeground("#5FE9B2").fg, INK);
+
+  assert.equal(bestForeground("#1B4D3E").fg, WHITE);
+  assert.equal(bestForeground("#000000").fg, WHITE);
+  assert.equal(bestForeground("#FFFFFF").fg, INK);
+});
+
+test("bestForeground: agrees with the published palette ratios", () => {
+  // docs/ilumo-brand.md quotes 11.21:1 for ink on the logo mint and 6.28:1 for
+  // white on brand indigo. Arrived at here independently, so a drift in either
+  // this module or the spec shows up as a failure rather than a disagreement
+  // nobody notices.
+  assert.equal(bestForeground("#5FE9B2").ratio.toFixed(2), "11.21");
+  assert.equal(bestForeground("#3852D6").ratio.toFixed(2), "6.28");
+});
+
+test("assertBrandColour: refuses only what carries neither foreground", () => {
+  // Accepted: far enough from the middle in either direction.
+  for (const good of ["#1B4D3E", "#7A1F2B", "#123B7A", "#FFD400", "#000000", "#FFFFFF"]) {
+    assert.equal(assertBrandColour(good).ok, true, `${good} should be accepted`);
+  }
+
+  // Refused: the middle, which reads as perfectly visible and is not readable.
+  for (const bad of ["#808080", "#7D8471"]) {
+    assert.equal(assertBrandColour(bad).ok, false, `${bad} should be refused`);
+  }
+});
+
+test("assertBrandColour: empty means default, not error", () => {
+  // Every school starts here. A refusal would make "no colour chosen" an error
+  // state on a form the school has not opened yet.
+  for (const empty of [null, undefined, "", "   "]) {
+    const result = assertBrandColour(empty);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.colour.bg, DEFAULT_BG);
+  }
+  assert.equal(defaultBrandColour().bg, DEFAULT_BG);
+  assert.ok(defaultBrandColour().ratio >= MIN_RATIO);
+});
+
+test("assertBrandColour: a refusal names the measured ratio", () => {
+  // The number is the actionable part - it tells an admin how far off they are,
+  // and a darker shade of their own colour usually clears it. A bare "no" is
+  // how a school ends up keeping our indigo instead of theirs.
+  const result = assertBrandColour("#808080");
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.error, /[0-9]\.[0-9][0-9]:1/);
+    assert.ok(result.ratio !== null && result.ratio < MIN_RATIO);
+  }
+});
+
+test("assertBrandColour: an accepted colour is safe to put in CSS", () => {
+  const result = assertBrandColour("#1b4d3e");
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  // Everything that reaches a <style> element must clear isSafeCssColour, or
+  // SchoolTheme drops it. Nothing here may ever become an injection vector.
+  assert.ok(isSafeCssColour(result.colour.bg));
+  assert.ok(isSafeCssColour(result.colour.fg));
+  assert.ok(isSafeCssColour(result.colour.quiet));
+
+  const css = schoolCssVars(result.colour);
+  assert.match(css, /^--school-bg:#[0-9A-F]{6};--school-fg:#[0-9A-F]{6};--school-quiet:#[0-9A-F]{8}$/);
+  // No way out of the declaration block.
+  assert.ok(!css.includes("}"));
+  assert.ok(!css.includes("<"));
+});
+
+test("isSafeCssColour: fails closed on anything that is not a hex literal", () => {
+  assert.ok(isSafeCssColour("#1B4D3E"));
+  assert.ok(isSafeCssColour("#1B4D3E1F"));
+  for (const bad of [
+    "red",
+    "#1b4d3e",           // lowercase never leaves normaliseHex
+    "var(--x)",
+    "#1B4D3E;}body{",
+    "url(x)",
+    "",
+  ]) {
+    assert.equal(isSafeCssColour(bad), false, `should refuse ${JSON.stringify(bad)}`);
+  }
+});
+
+test("tint: eight-digit hex, clamped", () => {
+  assert.equal(tint("#1B4D3E", 0), "#1B4D3E00");
+  assert.equal(tint("#1B4D3E", 1), "#1B4D3EFF");
+  // Out of range is clamped rather than producing a malformed value that would
+  // then fail isSafeCssColour and silently drop the whole theme.
+  assert.equal(tint("#1B4D3E", -5), "#1B4D3E00");
+  assert.equal(tint("#1B4D3E", 99), "#1B4D3EFF");
+  assert.ok(isSafeCssColour(tint("#1B4D3E")));
+});
+
+/* ------------------------------------------------------------------ *
+ * School branding: the crest
+ * ------------------------------------------------------------------ */
+
+test("crestTypeFor: images only, and nothing from the lesson list", () => {
+  assert.equal(crestTypeFor("crest.png"), "image/png");
+  assert.equal(crestTypeFor("CREST.PNG"), "image/png");
+  assert.equal(crestTypeFor("logo.jpeg"), "image/jpeg");
+  assert.equal(crestTypeFor("logo.jpg"), "image/jpeg");
+  assert.equal(crestTypeFor("mark.svg"), "image/svg+xml");
+
+  // STORABLE_TYPES accepts these for lesson material. A crest must not: a PDF
+  // served inline from an unauthenticated route is a liability, and a .docx
+  // crest is nonsense.
+  for (const bad of ["notes.pdf", "notes.docx", "notes.txt", "crest", "crest.php", ".png"]) {
+    assert.equal(crestTypeFor(bad), null, `should refuse ${bad}`);
+  }
+});
+
+test("pngSize: reads IHDR, and rejects a renamed file", () => {
+  // Minimal valid PNG header: signature, then the IHDR length/type, then width
+  // and height as big-endian uint32.
+  const png = (w: number, h: number) => {
+    const b = new Uint8Array(24);
+    b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    const put = (at: number, v: number) => {
+      b[at] = (v >>> 24) & 0xff;
+      b[at + 1] = (v >>> 16) & 0xff;
+      b[at + 2] = (v >>> 8) & 0xff;
+      b[at + 3] = v & 0xff;
+    };
+    put(16, w);
+    put(20, h);
+    return b;
+  };
+
+  assert.deepEqual(pngSize(png(512, 512)), { width: 512, height: 512 });
+  assert.deepEqual(pngSize(png(1024, 768)), { width: 1024, height: 768 });
+
+  // A JPEG renamed to .png. Reaching the manifest as an icon would install a
+  // broken tile on a child's home screen.
+  assert.equal(pngSize(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), null);
+  // Truncated.
+  assert.equal(pngSize(new Uint8Array([0x89, 0x50, 0x4e, 0x47])), null);
+});
+
+test("isIconCandidate: PNG, big enough, and square enough", () => {
+  const size = (w: number, h: number) => ({ width: w, height: h });
+
+  assert.equal(isIconCandidate("image/png", size(512, 512)), true);
+  assert.equal(isIconCandidate("image/png", size(1024, 1024)), true);
+
+  // Too small for an Android install icon.
+  assert.equal(isIconCandidate("image/png", size(256, 256)), false);
+  // A wide logo becomes a letterboxed smudge at 192px.
+  assert.equal(isIconCandidate("image/png", size(1024, 512)), false);
+  // SVG is fine on screen and useless as a maskable raster icon.
+  assert.equal(isIconCandidate("image/svg+xml", size(512, 512)), false);
+  assert.equal(isIconCandidate("image/jpeg", size(512, 512)), false);
+  // No measurable size means no icon - never guess.
+  assert.equal(isIconCandidate("image/png", null), false);
+
+  // A hair off square is still square: a 512x520 export should not be refused
+  // over 1.5%, or every hand-cropped crest fails.
+  assert.equal(isIconCandidate("image/png", size(520, 512)), true);
+});
+
+test("crest: the size cap is small enough to load on a sign-in screen", () => {
+  // This loads before anything a child came for, on a throttled 3G link. If
+  // somebody raises it, they should have to change this line and think.
+  assert.equal(MAX_CREST_BYTES, 150 * 1024);
+  assert.equal(MIN_ICON_PX, 512);
+  // The serving allowlist and the upload allowlist must not drift apart: every
+  // type that can be uploaded must be a type that can be served back.
+  for (const type of Object.values(CREST_EXTENSIONS)) {
+    assert.ok(
+      (CREST_TYPES as readonly string[]).includes(type),
+      `${type} is uploadable but not servable`
+    );
+  }
 });

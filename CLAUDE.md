@@ -265,6 +265,47 @@ not commentary on it.
 - A scheme has no marking guide and no field one could occupy, so it is safe for
   the student device store. It is the ideal thing to save on a phone.
 
+## School branding rules
+
+Per-school branding was added on 2026-08-27, on the owner's call that the product
+read as a third party a school had linked out to. **The school leads: its name
+and crest are the first thing on every signed-in screen, JDSmartLearn is the
+small line underneath, and the ilumo endorsement appears only in the footer and
+on the unbranded front door.** This amends `docs/ilumo-brand.md` section 1, which
+is shared with ResultPeak. Full design in `docs/SCHOOL-BRANDING.md`; the
+cross-repo half in `docs/resultpeak-school-branding-prompt.md`.
+
+- **`schools` stays read-only, so branding lives in `jdSchoolSettings`.**
+  ResultPeak stores no crest, no colour and no stable slug. This is not the
+  mirroring the attendance rule forbids — there is no original to drift from —
+  and it becomes the fallback the moment ResultPeak owns one.
+- **`getSchoolBrand()` is the ONLY read of school branding**, and it caches the
+  projection, never a school document. `getSchool()` is deliberately uncached
+  because of `assessmentTypes`; nothing may reintroduce a cached school object
+  for a later caller to reach into.
+- **A signed-in surface takes `schoolId` from the session. Never from a cookie.**
+  Any visitor can set the school cookie by opening `/s/anything`, so it may
+  decorate a pre-authentication screen and nothing else. Showing a teacher the
+  wrong school's crest above their own class's data is the failure this prevents.
+- **Never blank.** A school that has configured nothing still shows its own name
+  and a derived monogram. A feature that renders an empty header until an admin
+  acts has shipped broken for every school at once.
+- **A pinned device is not offered another school.** Arriving through the
+  school's own link suppresses the picker and the "Change school" link in both
+  audiences. `?school=change` keeps working when typed — stop advertising the
+  escape hatch, never remove it, or a transferring child is stranded.
+- **A school colour never becomes the action colour or a status colour**, and one
+  that cannot carry text at 4.5:1 is refused with its measured ratio, not
+  silently corrected. Validated by one function called from both the write path
+  and CI.
+- **Branding is not personal data and must never become it.** A crest, a name, a
+  colour, a motto. Nothing about a child, a member of staff or a mark — that is
+  what lets it render before anyone has signed in, and what keeps it safe in the
+  student device store.
+- **No school name in an AI payload.** Unchanged, and worth restating here
+  because this work puts `school.name` within easy reach of the generation path.
+
+
 ## Out of scope for v1 — refuse these
 
 WhatsApp integration · payments or Paystack · chat · video streaming · live classes · quiz engine with auto-marked objective questions · multiple question difficulty tiers · attendance · timetable · admissions · multi-branch · local languages · voice narration · native mobile apps · revision recommendations derived from ResultPeak exam results (still blocked until ResultPeak tags questions by topic and grades server-side)
@@ -276,6 +317,8 @@ keeps the two apart. A request to let students respond to an announcement is a
 request for chat and is still refused.
 
 **File storage: Cloudflare R2, never Firebase Storage.** Original lesson files are stored in Cloudflare R2 (free tier, zero egress) *in addition to* the extracted text — the text remains the student-facing default on slow networks. All storage access goes through `src/lib/storage/provider.ts`; no storage SDK is imported anywhere else. Files are served ONLY via the authenticated `/api/lessons/[id]/file` route (schoolId + class scoping, material-publish gating for students) — never a public bucket URL. **Firebase Storage remains forbidden** — it would force the shared project onto Blaze. If R2 credentials are absent, uploads gracefully degrade to text-only.
+
+**There is exactly ONE unauthenticated file route, and it is `/api/schools/[schoolId]/logo`.** It exists because the screen that most needs a school's crest is the sign-in screen, where nobody has a session yet, and a school's front door showing a grey box until you log in defeats the point of branding it. The exception is bounded and stays bounded: the URL names a **school**, never a storage key, and the key is read server-side from that school's own branding record — an arbitrary key in a path is how a route like this becomes a read primitive for the whole bucket. It 404s for a school that is missing, inactive or has no crest; the `Content-Type` comes from a server-side allowlist (`src/lib/branding/crest.ts`), never from the request or the stored object; SVG is served with a null CSP and `nosniff` because an SVG can carry script. What it returns is a logo the school prints on a uniform — no student data, no marking guide, and nothing worth enumerating. **Do not add a second route to this exception.** If another asset needs to render before sign-in, that is a design conversation, not a copy-paste.
 
 ---
 

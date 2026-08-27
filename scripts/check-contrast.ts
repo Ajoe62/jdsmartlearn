@@ -9,6 +9,14 @@
  *   npx tsx scripts/check-contrast.ts
  */
 import config from "../tailwind.config";
+import {
+  INK,
+  MIN_RATIO,
+  assertBrandColour,
+  bestForeground,
+  defaultBrandColour,
+  normaliseHex,
+} from "../src/lib/branding/colour";
 
 const COLORS = (config.theme?.extend?.colors ?? {}) as Record<string, string>;
 
@@ -105,6 +113,107 @@ for (const token of FILL_ONLY) {
     console.log(`FAIL  ${token} is now ${value.toFixed(2)}:1 - it is no longer fill-only`);
   } else {
     console.log(`  ok  ${value.toFixed(2).padStart(5)}:1  ${token} - fill only, as documented`);
+  }
+}
+
+/**
+ * The per-school colour gate.
+ *
+ * A school's colour is the ONE colour in the product that is not in
+ * tailwind.config, because it belongs to the school and is not known at build
+ * time. So it cannot be checked as a pair above. What CAN be checked, and is
+ * checked here, is that the function which admits or refuses it still behaves -
+ * using the SAME function the write path calls, never a copy of the arithmetic.
+ * Two copies of a contrast test is how one of them ends up weaker.
+ *
+ * See src/lib/branding/colour.ts and docs/SCHOOL-BRANDING.md section 5.
+ */
+console.log("\nPer-school colour (src/lib/branding/colour.ts):\n");
+
+// The pure module may not import tailwind.config - it has to run anywhere - so
+// its copy of `ink` is asserted against the real token here instead of drifting.
+if (INK !== COLORS.ink) {
+  failures++;
+  console.log(`FAIL  branding/colour INK is ${INK} but the ink token is ${COLORS.ink}`);
+} else {
+  console.log(`  ok  INK matches the ink token (${INK})`);
+}
+
+// A school that has chosen nothing must still land on a readable pair.
+const fallback = defaultBrandColour();
+if (fallback.ratio < MIN_RATIO) {
+  failures++;
+  console.log(`FAIL  the default school colour is ${fallback.ratio.toFixed(2)}:1`);
+} else {
+  console.log(
+    `  ok  ${fallback.ratio.toFixed(2).padStart(5)}:1  default (${fallback.bg} + computed ${fallback.fg})`
+  );
+}
+
+/**
+ * Colours a real Nigerian school might plausibly pick. Each asserts the
+ * DECISION rather than a fixed ratio, so this keeps working if MIN_RATIO moves.
+ *
+ * THE INTERESTING RESULT, AND THE REASON bestForeground() IS NOT A LIGHTNESS
+ * THRESHOLD: a bright school yellow is ACCEPTED. It is unreadable under white
+ * and excellent under ink, and picking the better of the two is the whole job.
+ * The logo mint is the same story at 11.21:1 - the very number
+ * docs/ilumo-brand.md quotes for `ink on success`, arrived at independently
+ * here, which is a useful cross-check that this module and the palette agree.
+ *
+ * What actually fails is the MIDDLE: a colour far enough from both ends to
+ * carry neither. Those are the two below, and they are the cases a naive
+ * "is it light or dark" test gets wrong in both directions.
+ */
+const SAMPLES: Array<[string, boolean, string]> = [
+  ["#1B4D3E", true, "deep green"],
+  ["#7A1F2B", true, "maroon"],
+  ["#123B7A", true, "navy"],
+  ["#000000", true, "black"],
+  ["#FFFFFF", true, "white - carries ink"],
+  ["#FFD400", true, "school yellow - carries ink, not white"],
+  ["#5FE9B2", true, "logo mint - carries ink at 11.21:1"],
+  ["#808080", false, "mid grey - carries neither"],
+  ["#7D8471", false, "mid sage - the near-miss that looks fine"],
+];
+
+for (const [value, shouldPass, what] of SAMPLES) {
+  const result = assertBrandColour(value);
+  const { ratio } = bestForeground(normaliseHex(value) as string);
+  if (result.ok !== shouldPass) {
+    failures++;
+    console.log(
+      `FAIL  ${value} was ${result.ok ? "accepted" : "refused"} but should have been ${
+        shouldPass ? "accepted" : "refused"
+      } - ${what}`
+    );
+    continue;
+  }
+  console.log(
+    `  ok  ${ratio.toFixed(2).padStart(5)}:1  ${value} ${
+      result.ok ? "accepted" : "refused "
+    } - ${what}`
+  );
+}
+
+/**
+ * A refusal has to be actionable. Naming the measured ratio is what lets an
+ * admin pick a darker shade of their own colour; a bare "no" leaves them
+ * guessing, which is how a school ends up with our indigo instead of theirs.
+ */
+const refused = assertBrandColour("#808080");
+if (refused.ok || !/[0-9]\.[0-9][0-9]:1/.test(refused.error)) {
+  failures++;
+  console.log("FAIL  a refusal must quote the measured ratio");
+} else {
+  console.log("  ok  a refusal quotes the measured ratio");
+}
+
+// Garbage is refused, never coerced into something that happens to parse.
+for (const bad of ["nope", "#12345", "rgb(1,2,3)", "#12345g"]) {
+  if (assertBrandColour(bad).ok) {
+    failures++;
+    console.log(`FAIL  "${bad}" was accepted as a colour`);
   }
 }
 

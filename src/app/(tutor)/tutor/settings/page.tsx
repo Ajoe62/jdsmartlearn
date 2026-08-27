@@ -4,6 +4,9 @@ import { getTutorSession } from "@/lib/auth/tutor";
 import { getSchool } from "@/lib/db/resultpeak";
 import { getCurrentTermSession, observedSessions } from "@/lib/db/school-settings";
 import SchoolSettingsForm from "./SchoolSettingsForm";
+import BrandingForm from "./BrandingForm";
+import { getSchoolBranding } from "@/lib/db/school-branding";
+import { getSchoolBrand } from "@/lib/branding/school";
 
 /**
  * Assessment settings. SCHOOL ADMIN ONLY, and rarely opened.
@@ -32,10 +35,12 @@ export default async function SchoolSettingsPage() {
     );
   }
 
-  const [current, sessions, school] = await Promise.all([
+  const [current, sessions, school, branding, brand] = await Promise.all([
     getCurrentTermSession(session.schoolId),
     observedSessions(session.schoolId),
     getSchool(session.schoolId),
+    getSchoolBranding(session.schoolId),
+    getSchoolBrand(session.schoolId),
   ]);
 
   // ResultPeak's own list, by its stable `value`. Never a default of ours.
@@ -68,6 +73,23 @@ export default async function SchoolSettingsPage() {
         sessions={sessions}
         assessmentTypes={assessmentTypes}
       />
+
+      {/* Branding sits under assessment settings rather than on a page of its
+          own: both are school-wide, admin-only, and opened about twice a year.
+          A second settings page would be a second thing to find. */}
+      {brand && (
+        <BrandingForm
+          schoolId={session.schoolId}
+          schoolName={brand.name}
+          current={{
+            shortName: branding.shortName,
+            colorHex: branding.colorHex,
+            motto: branding.motto,
+            crestUrl: brand.crestUrl,
+            logoIsIcon: branding.logoIsIcon,
+          }}
+        />
+      )}
     </main>
   );
 }

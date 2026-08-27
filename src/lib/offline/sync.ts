@@ -26,6 +26,7 @@ import {
   type StoredLesson,
   type StoredMaterial,
   type StoredScheme,
+  type OfflineBrand,
 } from "./db";
 import { batched, evictionPlan, planSync, type LocalLessonState } from "./merge";
 import { saveAnnouncements } from "./announcements";
@@ -185,6 +186,8 @@ async function runSync({ force }: { force?: boolean }): Promise<SyncResult> {
       readState?: ReadState;
       /** Absent when talking to a server that predates schemes of work. */
       schemes?: StudentSchemeSummary[];
+      /** Absent when talking to a server that predates school branding. */
+      brand?: OfflineBrand | null;
     };
     graceDaysFromServer = body.graceDays;
 
@@ -274,6 +277,14 @@ async function runSync({ force }: { force?: boolean }): Promise<SyncResult> {
       offlineGraceUntil: graceUntil(),
       etag,
       readState: body.readState,
+      /**
+       * `undefined` when the server sent no brand at all (an older deployment,
+       * or a cached response from one), which leaves the previous value in
+       * place. `null` from the server means the school genuinely does not
+       * resolve, and that clears it. The two are different answers and are kept
+       * different, the same way `announcements` is guarded above.
+       */
+      brand: body.brand === undefined ? meta?.brand : (body.brand ?? undefined),
     });
 
     /**

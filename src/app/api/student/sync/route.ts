@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getStudentSession } from "@/lib/auth/student";
+import { getSchoolBrand } from "@/lib/branding/school";
 import { getClassSyncIndex } from "@/lib/db/student-content";
 import { getNoticesForClass } from "@/lib/db/announcements";
 import { getReadState } from "@/lib/db/read-state";
@@ -50,11 +51,25 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
   }
 
-  const [lessons, noticeCandidates, readState, schemes] = await Promise.all([
+  const [lessons, noticeCandidates, readState, schemes, brand] = await Promise.all([
     getClassSyncIndex(session.schoolId, session.classId),
     getNoticesForClass(session.schoolId, session.classId),
     getReadState(session.schoolId, session.studentId),
     listPublishedSchemesForClass(session.schoolId, session.classId),
+    /**
+     * School branding rides this response for exactly the reason announcements
+     * do: the device already syncs on app open, on reconnect, on an explicit
+     * button and on a one-shot Background Sync tag, and a branding endpoint
+     * would be polled. Polling is forbidden (CLAUDE.md, Quota rules).
+     *
+     * NOT folded into getClassSyncBundle, deliberately. That cache is keyed per
+     * CLASS and tagged to lesson publishes; branding is per SCHOOL and changes
+     * on a different event entirely. Putting it there would store the same crest
+     * once per class and make every crest edit invalidate every class's lesson
+     * index. getSchoolBrand is already cached per school, so this adds no
+     * Firestore read in the common case and never fans out.
+     */
+    getSchoolBrand(session.schoolId),
   ]);
 
   // The date window and the reach test are applied here, in memory, over the
@@ -80,6 +95,25 @@ export async function GET(req: Request) {
      * /api/student/announcements/read and takes back whatever the server says.
      */
     readState,
+    /**
+     * Null for a school we cannot resolve, which the device renders as the plain
+     * product lockup - the same fallback every other surface uses.
+     *
+     * A PROJECTION, not the server object: no slug, no motto, and above all no
+     * storage key. The crest is a URL to our own route.
+     */
+    brand: brand
+      ? {
+          schoolId: brand.schoolId,
+          name: brand.name,
+          shortName: brand.shortName,
+          initials: brand.initials,
+          crestUrl: brand.crestUrl,
+          bg: brand.colour.bg,
+          fg: brand.colour.fg,
+          quiet: brand.colour.quiet,
+        }
+      : null,
   };
 
   // Hash the payload, not the request - the device only needs to know whether

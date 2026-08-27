@@ -71,6 +71,29 @@ export const STORE = {
 export type StoreName = (typeof STORE)[keyof typeof STORE];
 
 /** What the device knows about its own sync state. Single row, key "state". */
+/**
+ * The school's identity, as the device holds it.
+ *
+ * Rides the sync response so the offline shell can render the school rather than
+ * the product. Carries no personal data by construction - a name, two letters, a
+ * URL and three colours - which is what makes it safe on a shared phone, the
+ * same argument that lets `announcements` live here.
+ *
+ * Deliberately NOT the server's full `SchoolBrand`: that type lives in a
+ * server-only module and carries a slug and a motto this has no use for.
+ */
+export type OfflineBrand = {
+  schoolId: string;
+  name: string;
+  shortName: string;
+  initials: string;
+  crestUrl: string | null;
+  /** Validated hex, straight from assertBrandColour on the server. */
+  bg: string;
+  fg: string;
+  quiet: string;
+};
+
 export type OfflineMeta = {
   studentId: string;
   classId: string;
@@ -92,6 +115,16 @@ export type OfflineMeta = {
    * Optional: a store written by v3 has no such field.
    */
   readState?: ReadState;
+  /**
+   * The school's branding, mirrored so the offline shell shows the school and
+   * not the product.
+   *
+   * Optional: a store written before branding existed has no such field, and a
+   * server that predates it sends none. Both read as "no school branding", which
+   * renders the plain product lockup - the same fallback a school we cannot name
+   * already gets.
+   */
+  brand?: OfflineBrand;
 };
 
 /**

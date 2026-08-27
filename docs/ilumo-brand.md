@@ -9,13 +9,23 @@ here and a value in a repo disagree, this file wins and the repo is wrong.
 
 ## 1. Brand architecture
 
-**Endorsed.** Each product keeps its own name and leads with it. ilumo endorses rather than
-replaces:
+**School-branded, product-endorsed.** Amended 2026-08-27; it previously read "Endorsed — each
+product keeps its own name and leads with it". Three tiers, and which one applies depends on
+whether we know whose school this is:
 
 ```
-JDSmartLearn          ← the product name, in the display face, is what a user reads first
-an Ilumotech product  ← the endorsement: small, muted, never competing with the product name
+Capstone Academy      ← the SCHOOL: its crest and name, what a user reads first
+JDSmartLearn          ← the product: small, under the school name or in the footer
+an Ilumotech product  ← the endorsement: footer and unbranded front door only
 ```
+
+**Why it changed.** A school links to these products from its own website, and a header leading
+with our name told every child, teacher and admin they had been handed off to a third party. The
+school's identity is the first thing on the screen; ours is the quiet line underneath.
+
+**When the school is unknown, the product leads.** A visitor we cannot place gets the plain
+product lockup — branding a school we cannot name is a guess, and a wrong crest is worse than
+none. In JDSmartLearn that is `AppHeader` with `brand={null}`.
 
 The **mark is shared**, unchanged, across every product. The **wordmark is per product**, set in
 the display face. Nothing else varies — a teacher who uses both products should never wonder
@@ -23,6 +33,12 @@ whether they are in the same family.
 
 **The endorsement is not a logo.** It is a line of text, set at 12px in `muted`. Do not lock it
 up, box it, or give it a mark of its own.
+
+**A school's colour never becomes a product colour.** When per-school colour ships (phase 3 of
+`docs/SCHOOL-BRANDING.md`) it drives a header band and nothing else. `brand` indigo stays the
+action colour and the status colours do not move — for the reason in section 3: a warning that
+borrowed a brand colour would stop reading as a warning, and that holds harder when the borrowed
+colour belongs to a school.
 
 ---
 
