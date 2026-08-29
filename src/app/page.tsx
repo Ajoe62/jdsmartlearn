@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { CardLink } from "@/components/ui/Card";
 import SchoolMark from "@/components/ui/SchoolMark";
 import Wordmark from "@/components/ui/Wordmark";
-import { getBrandingSchoolId } from "@/lib/auth/student";
+import { brandingSchoolId } from "@/lib/routing/request-school";
 import { getSchoolBrand, type SchoolBrand } from "@/lib/branding/school";
 import { resultPeakSchoolUrl, resultPeakStaffUrl } from "@/lib/partner-links";
 
@@ -27,7 +27,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 async function pinnedBrand() {
-  const schoolId = await getBrandingSchoolId();
+  const schoolId = await brandingSchoolId();
   return schoolId ? await getSchoolBrand(schoolId) : null;
 }
 

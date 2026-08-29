@@ -12,6 +12,44 @@ export const RP = {
   results: "results",
   exams: "exams",
   tutors: (schoolId: string) => `schools/${schoolId}/tutors`,
+  /**
+   * `schoolDomains/{hostname}` -> `{ schoolId, active, isPrimary }`, where the
+   * document id IS the normalised hostname. READ ONLY here, always.
+   *
+   * ResultPeak owns the write path (`api/_lib/domainActions.js`), which
+   * validates the hostname, refuses reserved labels and enforces
+   * one-school-per-address in a transaction. Those checks are therefore
+   * invariants of the DATA rather than properties of one screen, and this repo
+   * gets them for free by never writing.
+   *
+   * Read by document get, so there is no query, no index and no rules change
+   * needed on this side. A read is one document per non-platform hostname per
+   * cache window; a platform host is never looked up at all
+   * (`shouldLookUpHost`), which is what keeps the shared domain from spending
+   * the Spark quota on documents that do not exist.
+   *
+   * NOTHING RESOLVED FROM HERE IS A PERMISSION. See lib/routing/hostname.ts.
+   */
+  schoolDomains: "schoolDomains",
+  /**
+   * `schoolBranding/{schoolId}`: how a school looks, before anybody signs in.
+   * READ ONLY here, always.
+   *
+   * A DERIVED PROJECTION of `schools/{id}.branding`, written by exactly one
+   * writer in ResultPeak immediately after a school admin saves. Data flows one
+   * way and never back. A write from here would be a second writer on a document
+   * whose entire design is that it has one, and it would be reverted silently at
+   * an unpredictable time - which is worse than being refused.
+   *
+   * This repo reads the PROJECTION rather than the source document because it is
+   * smaller, it is what ResultPeak's own signed-out client reads, and it carries
+   * `logoUpdatedAt` - a key that moves only when the crest bytes move.
+   *
+   * ABSENT IS A REAL STATE. ResultPeak deletes this as a stage of its
+   * school-purge cascade, so a missing projection means the school is gone, not
+   * that it has yet to be backfilled. Never fall back to a cached crest.
+   */
+  schoolBranding: "schoolBranding",
 } as const;
 
 /** JDSmartLearn owns these. Read + write. */
@@ -157,6 +195,27 @@ export const RESULTPEAK_OWNED = new Set<string>([
   "results", "examSessions", "theorySubmissions", "manualScores", "termNotes",
   "flags", "notifications", "adminAuditLogs", "studyDocuments", "admins",
   "attendance",
+  /**
+   * The addresses a school answers on, and how it looks before anyone signs in.
+   * Both are ResultPeak's, and both are newer than most of this list.
+   *
+   * `schoolDomains` is written by ResultPeak's admin screens, which validate the
+   * hostname and hold one-school-per-address in a transaction. A write from here
+   * would land at a DETERMINISTIC id - the hostname itself - so it would not
+   * create a stray row somebody could spot, it would land on top of the real
+   * mapping. That is the same argument as `attendance` above, and it is the
+   * reason both are named here rather than left to good intentions.
+   *
+   * `schoolBranding` is a DERIVED PROJECTION of `schools/{id}.branding`, written
+   * by exactly one writer in ResultPeak immediately after it saves the school
+   * (`api/_lib/branding/publicBranding.js`, "data flows one way and NEVER
+   * back"). A write from here would be a second writer on a document whose whole
+   * design is that it has one, and it would be silently reverted the next time a
+   * school admin saved their profile. READ it; never write it. What this repo
+   * still owns is the crest bytes in R2 and its own `jdSchoolSettings.branding`
+   * record - see lib/branding/school.ts for the resolution order.
+   */
+  "schoolDomains", "schoolBranding",
 ]);
 
 /**

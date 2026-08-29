@@ -440,3 +440,62 @@ plainly: `assertSubjectAccess()` and `assertDocumentSubjectAccess()` in
    Nothing in JDSmartLearn acts on this either way: its guard never reads
    ResultPeak's list, which is exactly why the drift cost nothing. Do not "fix"
    it by adding those names anywhere in this repo.
+
+---
+
+## School addresses and branding: nothing to append, two things to confirm
+
+Added 2026-08-29 with hostname resolution. **JDSmartLearn needs no rule for
+either collection**, because it reads both by document get through the Admin SDK,
+which bypasses rules entirely. This section exists so the next person does not go
+looking for a rule that was never needed.
+
+1. **`schoolDomains` is already ruled, and the existing rule is correct.**
+
+   ```
+   match /schoolDomains/{hostname} {
+     allow get: if true;
+     allow list: if false;
+     allow write: if false;
+   }
+   ```
+
+   `get` public and `list` denied is the whole design: a signed-out visitor must
+   resolve the school whose address they typed before there is any session to
+   ask, and that is one document whose id they already have. A **listable**
+   collection would be a public directory of every school on the platform.
+   Nothing in the document is personal - a school id and two flags - and resolving
+   one grants nothing, because `schoolId` for access comes from the caller's
+   token on both sides.
+
+   Keep `write: if false`. Both products write it only through the Admin SDK, and
+   JDSmartLearn does not write it at all.
+
+2. **`schoolBranding` needs its rule written in the ResultPeak repo, by
+   ResultPeak.** It is their collection: a derived projection of
+   `schools/{id}.branding` with exactly one writer over there. The shape it wants
+   is the same asymmetry as above - a public `get` so a signed-out front door can
+   draw a crest, an explicit **deny on `list`** so the collection cannot be
+   enumerated into a prospect list, and `write: if false` because only the Admin
+   SDK writes it.
+
+   JDSmartLearn reads `schools/{id}.branding` directly rather than this
+   projection, so it is unaffected either way.
+
+3. **Handoff item, not a rule: ResultPeak should link JDSmartLearn's crest
+   cross-origin rather than hosting a second copy.**
+
+   `/api/schools/{schoolId}/logo` is unauthenticated by design and safe to hot-link:
+   the URL names a school and never a storage key, the content type comes from a
+   server-side allowlist, and it 404s for a school that is missing, inactive or
+   has no crest. ResultPeak has no service worker and no offline requirement, so
+   a cross-origin image costs it nothing.
+
+   The mitigation ResultPeak needs is one line: **if the image fails to load,
+   render the school name as text.** That is the same fallback this repo needs
+   anyway, and it is what keeps ResultPeak's sign-in page from depending on this
+   app being reachable.
+
+   Which crest is the real one is still undecided - see
+   `docs/resultpeak-school-domains-prompt.md`, Part B. Do not act on this item
+   until that is settled.

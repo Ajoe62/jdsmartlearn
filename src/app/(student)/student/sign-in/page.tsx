@@ -1,4 +1,5 @@
-import { getPinnedSchoolId, getRememberedSchoolId } from "@/lib/auth/student";
+import { getRememberedSchoolId } from "@/lib/auth/student";
+import { brandingSchoolId, pinnedSchoolId } from "@/lib/routing/request-school";
 import { getSchoolDirectory } from "@/lib/db/resultpeak";
 import SignInForm from "./SignInForm";
 
@@ -16,11 +17,18 @@ export default async function StudentSignInPage({
   searchParams: Promise<{ expired?: string; school?: string }>;
 }) {
   const params = await searchParams;
-  const [schools, remembered, pinnedId] = await Promise.all([
+  const [schools, cookieRemembered, pinnedId, resolved] = await Promise.all([
     getSchoolDirectory(),
     getRememberedSchoolId(),
-    getPinnedSchoolId(),
+    pinnedSchoolId(),
+    brandingSchoolId(),
   ]);
+
+  // THE HOSTNAME BEATS THE COOKIE, here as everywhere. A phone that opened one
+  // school's /s/ link a year ago must not preselect that school on a different
+  // school's own address - the visitor typed the address, and the cookie is a
+  // side effect they have forgotten about. See lib/routing/request-school.ts.
+  const remembered = resolved ?? cookieRemembered;
 
   // ?school=change re-opens the picker on a phone that already remembers one.
   //

@@ -14,7 +14,14 @@ import OfflineBar from "./OfflineBar";
  * `studentId` comes from the server-verified session, which is what lets boot()
  * decide whether this phone's saved lessons belong to the person now holding it.
  */
-export default function StudentShell({ studentId }: { studentId: string }) {
+export default function StudentShell({
+  studentId,
+  schoolId,
+}: {
+  studentId: string;
+  /** From the session, never the hostname. A change wipes the device store. */
+  schoolId: string;
+}) {
   const router = useRouter();
 
   useEffect(() => {
@@ -27,7 +34,7 @@ export default function StudentShell({ studentId }: { studentId: string }) {
       // for a cached shell. See lib/branding/apply.
       applySchoolColour((await getMeta())?.brand);
 
-      const result = await boot(studentId);
+      const result = await boot(studentId, schoolId);
       if (cancelled) return;
       // The store was wiped: either the grace window closed or the roster says
       // this account is gone. Either way the student must reach the network and
@@ -43,7 +50,7 @@ export default function StudentShell({ studentId }: { studentId: string }) {
       cancelled = true;
       stop();
     };
-  }, [studentId, router]);
+  }, [studentId, schoolId, router]);
 
   return <OfflineBar />;
 }

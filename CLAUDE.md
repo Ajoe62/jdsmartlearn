@@ -275,10 +275,35 @@ on the unbranded front door.** This amends `docs/ilumo-brand.md` section 1, whic
 is shared with ResultPeak. Full design in `docs/SCHOOL-BRANDING.md`; the
 cross-repo half in `docs/resultpeak-school-branding-prompt.md`.
 
-- **`schools` stays read-only, so branding lives in `jdSchoolSettings`.**
-  ResultPeak stores no crest, no colour and no stable slug. This is not the
-  mirroring the attendance rule forbids — there is no original to drift from —
-  and it becomes the fallback the moment ResultPeak owns one.
+- **ResultPeak owns branding. Decided 2026-08-29. This repo reads and never
+  writes.** `schools/{id}.branding` is the source of truth over there and
+  `schoolBranding/{id}` is its public projection, written by exactly one writer.
+  This repo reads the **projection**: it is the smaller document, it is the one
+  ResultPeak's own signed-out client reads, and it carries `logoUpdatedAt`, which
+  moves only when the crest bytes move. `schools/{id}` is still read for `name`
+  and `isActive`. Both collections are refused by `assertWritable()`.
+  For two days in August this repo had a rival branding record in
+  `jdSchoolSettings`, an R2 crest and its own editor. **All three are gone, not
+  deprecated.** A form left running is a form somebody uses, and then two
+  records disagree about what a school looks like. Nothing was lost: measured
+  before removal, zero schools had a crest in R2, zero had an icon-eligible
+  crest, and no settings document had a `branding` map at all. Crest, colour and
+  short name are edited once, in ResultPeak's school profile.
+  **A missing projection means the school is GONE**, not un-backfilled:
+  ResultPeak deletes it as a stage of its purge cascade. Render the plain product
+  lockup, never a stale cached crest.
+- **The crest is served as bytes, never shipped as a data URI in a sync
+  response.** ResultPeak's crest is 77 to 81 KB of base64. `/api/schools/{id}/logo`
+  decodes it server-side, so the student sync payload carries a ~220 byte
+  versioned URL instead. Measured: 206 to 238 bytes against 77.6 to 81.3 KB.
+  This matters because `/api/student/sync` ETags its whole body, so an inline
+  crest would cost every child in a class a fresh 81 KB every time a tutor
+  published a lesson. It is also what keeps the crest offline-safe: same-origin,
+  already on the service worker's allowlist, and versioned by `logoUpdatedAt` so
+  a motto edit does not bust it. **A cross-origin crest cannot survive offline**,
+  because the service worker refuses every cross-origin request and that deny
+  list does not change, so an https crest is never proxied and degrades to the
+  monogram.
 - **`getSchoolBrand()` is the ONLY read of school branding**, and it caches the
   projection, never a school document. `getSchool()` is deliberately uncached
   because of `assessmentTypes`; nothing may reintroduce a cached school object
@@ -318,7 +343,7 @@ request for chat and is still refused.
 
 **File storage: Cloudflare R2, never Firebase Storage.** Original lesson files are stored in Cloudflare R2 (free tier, zero egress) *in addition to* the extracted text — the text remains the student-facing default on slow networks. All storage access goes through `src/lib/storage/provider.ts`; no storage SDK is imported anywhere else. Files are served ONLY via the authenticated `/api/lessons/[id]/file` route (schoolId + class scoping, material-publish gating for students) — never a public bucket URL. **Firebase Storage remains forbidden** — it would force the shared project onto Blaze. If R2 credentials are absent, uploads gracefully degrade to text-only.
 
-**There is exactly ONE unauthenticated file route, and it is `/api/schools/[schoolId]/logo`.** It exists because the screen that most needs a school's crest is the sign-in screen, where nobody has a session yet, and a school's front door showing a grey box until you log in defeats the point of branding it. The exception is bounded and stays bounded: the URL names a **school**, never a storage key, and the key is read server-side from that school's own branding record — an arbitrary key in a path is how a route like this becomes a read primitive for the whole bucket. It 404s for a school that is missing, inactive or has no crest; the `Content-Type` comes from a server-side allowlist (`src/lib/branding/crest.ts`), never from the request or the stored object; SVG is served with a null CSP and `nosniff` because an SVG can carry script. What it returns is a logo the school prints on a uniform — no student data, no marking guide, and nothing worth enumerating. **Do not add a second route to this exception.** If another asset needs to render before sign-in, that is a design conversation, not a copy-paste.
+**There is exactly ONE unauthenticated file route, and it is `/api/schools/[schoolId]/logo`.** It exists because the screen that most needs a school's crest is the sign-in screen, where nobody has a session yet, and a school's front door showing a grey box until you log in defeats the point of branding it. The exception is bounded and stays bounded: the URL names a **school** and nothing else. There is no storage key anywhere in the path: the bytes are decoded from the data URI on that school's own branding record in `schoolBranding`, so there is no object store for a crafted path to reach into. This got strictly narrower when ResultPeak took ownership of the crest. It 404s for a school that is missing, inactive or has no crest; the `Content-Type` comes from a server-side allowlist (`src/lib/branding/crest.ts`), never from the request or the stored object; SVG is served with a null CSP and `nosniff` because an SVG can carry script. What it returns is a logo the school prints on a uniform: no student data, no marking guide, and nothing worth enumerating. **Do not add a second route to this exception.** If another asset needs to render before sign-in, that is a design conversation, not a copy-paste.
 
 ---
 

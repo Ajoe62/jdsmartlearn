@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getStudentSession } from "@/lib/auth/student";
 import { getSchoolBrand } from "@/lib/branding/school";
+import { isOfflineSafeCrest } from "@/lib/branding/crest";
 import { getClassSyncIndex } from "@/lib/db/student-content";
 import { getNoticesForClass } from "@/lib/db/announcements";
 import { getReadState } from "@/lib/db/read-state";
@@ -108,7 +109,22 @@ export async function GET(req: Request) {
           name: brand.name,
           shortName: brand.shortName,
           initials: brand.initials,
-          crestUrl: brand.crestUrl,
+          /**
+           * ONLY A CREST THAT WILL STILL PAINT WITH THE NETWORK OFF.
+           *
+           * Our own /api/schools/{id}/logo is same-origin and already cached by
+           * the service worker, and a data URI is self-contained; both survive.
+           * A cross-origin https crest - which is what a school branded in
+           * ResultPeak may have - is refused by the service worker's deny-list
+           * as its second check, and that list is not changeable for this
+           * (CLAUDE.md). Saving one anyway would put a URL in IndexedDB whose
+           * only offline behaviour is to fail.
+           *
+           * Dropped rather than saved-and-hoped, so the device falls back to the
+           * school's monogram in the school's colour: the school's name in text,
+           * which is the documented degrade.
+           */
+          crestUrl: isOfflineSafeCrest(brand.crestUrl) ? brand.crestUrl : null,
           bg: brand.colour.bg,
           fg: brand.colour.fg,
           quiet: brand.colour.quiet,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { refreshStudentSession } from "@/lib/auth/student";
+import { refreshStudentSession, rememberSchool } from "@/lib/auth/student";
+import { resolveHost } from "@/lib/routing/request-school";
 
 /**
  * Re-authorize a device that has been offline and reissue its 12h session.
@@ -29,6 +30,27 @@ export async function POST() {
       { error: "Sign in again to read your lessons.", wipe: false },
       { status: 401 }
     );
+  }
+
+  /**
+   * WHERE THE STALE SCHOOL COOKIE IS PHYSICALLY REPLACED.
+   *
+   * The hostname already beats the cookie everywhere it is read
+   * (lib/routing/request-school.ts), so this changes no behaviour on its own -
+   * it stops a year-old cookie for another school following the device back to
+   * the shared domain, where no hostname resolves and the cookie is all there
+   * is. This is the right place because a Server Component cannot set a cookie
+   * in Next, and boot() already calls this route on every app open and every
+   * reconnect: no new request, and no new sync mechanism.
+   *
+   * Written from the SESSION's school, not the hostname's. The hostname only
+   * tells us the cookie is now suspect; what replaces it has to be the value
+   * the server verified, or a stranger with a DNS record could repoint a child's
+   * device by being visited once.
+   */
+  const host = await resolveHost();
+  if (host.mode === "school" && host.schoolId !== outcome.session.schoolId) {
+    await rememberSchool(outcome.session.schoolId);
   }
 
   return NextResponse.json({

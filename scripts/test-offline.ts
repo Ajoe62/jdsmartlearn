@@ -11,7 +11,8 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -46,13 +47,7 @@ import {
   tint,
 } from "../src/lib/branding/colour";
 import {
-  CREST_EXTENSIONS,
   CREST_TYPES,
-  MAX_CREST_BYTES,
-  MIN_ICON_PX,
-  crestTypeFor,
-  isIconCandidate,
-  pngSize,
 } from "../src/lib/branding/crest";
 import { JD, RESULTPEAK_OWNED } from "../src/lib/db/collections";
 import { readOnlyDb } from "../src/lib/db/read-only";
@@ -103,6 +98,29 @@ import {
   type ShelfLesson,
 } from "../src/lib/shelf/build";
 import { claimRefusal } from "../src/lib/auth/claims";
+import { ownerVerdict } from "../src/lib/offline/owner";
+import {
+  crestUrlFor,
+  decodeCrestDataUri,
+  isOfflineSafeCrest,
+  isSafeCrestUrl,
+} from "../src/lib/branding/crest";
+import type { OfflineBrand } from "../src/lib/offline/db";
+import {
+  isReservedHost,
+  normaliseHostname,
+  parsePlatformHosts,
+  printableAddress,
+  resolveHostMode,
+  shouldLookUpHost,
+  zoneLabel,
+  type SchoolDomainMapping,
+} from "../src/lib/routing/hostname";
+import {
+  assertFirebaseConfig,
+  missingConfigKeys,
+  missingConfigMessage,
+} from "../src/lib/firebase/env";
 import {
   isAwaitingAllocation,
   isUnallocated,
@@ -2676,80 +2694,806 @@ test("tint: eight-digit hex, clamped", () => {
  * School branding: the crest
  * ------------------------------------------------------------------ */
 
-test("crestTypeFor: images only, and nothing from the lesson list", () => {
-  assert.equal(crestTypeFor("crest.png"), "image/png");
-  assert.equal(crestTypeFor("CREST.PNG"), "image/png");
-  assert.equal(crestTypeFor("logo.jpeg"), "image/jpeg");
-  assert.equal(crestTypeFor("logo.jpg"), "image/jpeg");
-  assert.equal(crestTypeFor("mark.svg"), "image/svg+xml");
+/* -------------------------------------------------------------------------
+ * Firebase configuration: env-driven, and provably not pasted back into source
+ * ---------------------------------------------------------------------- */
 
-  // STORABLE_TYPES accepts these for lesson material. A crest must not: a PDF
-  // served inline from an unauthenticated route is a liability, and a .docx
-  // crest is nonsense.
-  for (const bad of ["notes.pdf", "notes.docx", "notes.txt", "crest", "crest.php", ".png"]) {
-    assert.equal(crestTypeFor(bad), null, `should refuse ${bad}`);
+test("a missing variable is named, not swallowed", () => {
+  assert.deepEqual(missingConfigKeys({ A: "x", B: "y" }), []);
+  // Blank counts as missing. `FIREBASE_PROJECT_ID=` with nothing after it is the
+  // commonest way to half-configure this, and treating it as present hands the
+  // Firebase SDK an empty string that fails much later and names none of this.
+  assert.deepEqual(missingConfigKeys({ A: "x", B: "" }), ["B"]);
+  assert.deepEqual(missingConfigKeys({ A: "   ", B: undefined }), ["A", "B"]);
+
+  // EVERY missing key, not just the first: configuring a fresh checkout should
+  // not be four runs of the same error.
+  const message = missingConfigMessage("admin", ["FIREBASE_CLIENT_EMAIL", "FIREBASE_PROJECT_ID"]);
+  assert.ok(message.includes("FIREBASE_CLIENT_EMAIL"));
+  assert.ok(message.includes("FIREBASE_PROJECT_ID"));
+  // And it must say there is no default, because a silent fallback here would
+  // point a misconfigured deployment at a paying school's live data.
+  assert.ok(/no default project id/i.test(message));
+  assert.ok(/\.env\.example/.test(message));
+});
+
+test("assertFirebaseConfig throws with the variable names, or returns them narrowed", () => {
+  assert.throws(
+    () => assertFirebaseConfig("client", { NEXT_PUBLIC_FIREBASE_API_KEY: undefined }),
+    /NEXT_PUBLIC_FIREBASE_API_KEY/
+  );
+  // The client message must warn that these are build-time, since a variable
+  // added to Vercel after a deploy silently does nothing until the next one.
+  assert.throws(() => assertFirebaseConfig("client", { A: "" }), /BUILD time/);
+  // The admin message must warn the other way: never NEXT_PUBLIC_.
+  assert.throws(() => assertFirebaseConfig("admin", { A: "" }), /NEXT_PUBLIC_/);
+
+  const ok = assertFirebaseConfig("admin", { FIREBASE_PROJECT_ID: "some-project" });
+  assert.equal(ok.FIREBASE_PROJECT_ID, "some-project");
+});
+
+/**
+ * The lint rule for "Firebase configuration is configuration, not source".
+ *
+ * Nothing stops the next person pasting a project id back in while debugging
+ * and committing it, and a hardcoded one is INVISIBLE: the app works perfectly
+ * for whoever pasted it, and pins every future deployment to one project. Worse
+ * here than in most repos, because that project is shared with ResultPeak and
+ * live with a paying school.
+ *
+ * Scans TRACKED files only (`git ls-files`), so `.env.local`, anything
+ * untracked and node_modules are out of scope by construction - those are
+ * exactly where these values are supposed to live.
+ *
+ * The banned project id is assembled from two halves below so that THIS FILE
+ * does not contain it. That is not cuteness: the alternative is putting the
+ * scanner on its own allowlist, which would let a real credential be pasted
+ * into a test fixture and stay silent.
+ */
+const SHARED_PROJECT_ID = "resultpilot" + "-ddf7c";
+
+/** Compressed bytes match by accident and have no source to audit. */
+const BINARY_FILE = /\.(docx|xlsx|pdf|zip|png|jpe?g|gif|webp|ico|woff2?|ttf|eot|mp4)$/i;
+
+/**
+ * An env file is where these values belong, so it is exempt from all of it.
+ * `.env.local` is untracked and never reaches this scan anyway; `.env.example`
+ * is the template and names the shared project in a comment on purpose.
+ */
+const ENV_FILES = new Set([".env.example"]);
+
+/**
+ * Prose may name WHICH PROJECT the two repositories share - the ResultPeak
+ * handover prompts have to, or the session reading them cannot tell. Prose may
+ * never carry a credential, so this exempts the project id and nothing else.
+ */
+const isProse = (file: string) => file.startsWith("docs/") && file.endsWith(".md");
+
+const BANNED: {
+  name: string;
+  pattern: RegExp;
+  proseAllowed: boolean;
+  fix: string;
+}[] = [
+  {
+    name: "the shared Firebase project id",
+    pattern: new RegExp(SHARED_PROJECT_ID, "g"),
+    proseAllowed: true,
+    fix: "Read it from FIREBASE_PROJECT_ID / NEXT_PUBLIC_FIREBASE_PROJECT_ID instead.",
+  },
+  {
+    name: "a Firebase-hosted domain naming a real project",
+    // authDomain, and the storage hosts we must never use. The whole host is
+    // matched and the placeholder filtered out afterwards rather than with a
+    // lookbehind: `(?<!your-project)` looks right and is not, because the engine
+    // simply restarts the match after the hyphen and reports the tail of the
+    // placeholder as a real host. A filter on the finished match cannot be
+    // sidestepped that way.
+    pattern:
+      /[a-z0-9][a-z0-9.-]*\.(?:firebaseapp\.com|firebasestorage\.app|appspot\.com|firebaseio\.com)/g,
+    proseAllowed: true,
+    fix: "Read it from NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN instead.",
+  },
+  {
+    name: "a Firebase web API key",
+    pattern: /AIza[0-9A-Za-z_-]{35}/g,
+    proseAllowed: false,
+    fix: "Read it from NEXT_PUBLIC_FIREBASE_API_KEY instead.",
+  },
+  {
+    name: "a service account private key",
+    pattern: /-----BEGIN (?:RSA )?PRIVATE KEY-----/g,
+    proseAllowed: false,
+    fix: "Read it from FIREBASE_PRIVATE_KEY instead. Rotate the key: it is in git history now.",
+  },
+];
+
+const PLACEHOLDER = /^your-project\./i;
+
+test("no Firebase configuration is hardcoded outside an env file", () => {
+  const tracked = execFileSync("git", ["ls-files"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+  })
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  // A scan that silently matched nothing would pass forever. Prove it ran.
+  assert.ok(tracked.length > 50, `git ls-files returned only ${tracked.length} files`);
+
+  const offences: string[] = [];
+
+  for (const file of tracked) {
+    if (ENV_FILES.has(file) || BINARY_FILE.test(file)) continue;
+
+    let text: string;
+    try {
+      text = readFileSync(path.resolve(process.cwd(), file), "utf8");
+    } catch {
+      continue; // deleted from the working tree but still in the index
+    }
+
+    for (const rule of BANNED) {
+      if (rule.proseAllowed && isProse(file)) continue;
+      const hits = (text.match(rule.pattern) ?? []).filter((hit) => !PLACEHOLDER.test(hit));
+      if (hits.length) {
+        offences.push(`${file}: ${rule.name} (${hits[0]}). ${rule.fix}`);
+      }
+    }
+  }
+
+  assert.deepEqual(offences, [], `Hardcoded Firebase configuration:\n${offences.join("\n")}`);
+});
+
+/* -------------------------------------------------------------------------
+ * School addresses: hostname resolution
+ *
+ * The whole point of this module is that a hostname GRANTS NOTHING, so most of
+ * these tests are about what resolution refuses to do rather than what it does.
+ * ---------------------------------------------------------------------- */
+
+/** A configured deployment: it knows its zone and its own address. */
+const CONFIGURED = {
+  zone: "learn.example.ng",
+  platformHosts: ["jdsmartlearn.example.com"],
+};
+
+const mapped = (schoolId: string, over: Partial<SchoolDomainMapping> = {}): SchoolDomainMapping => ({
+  schoolId,
+  active: true,
+  isPrimary: true,
+  ...over,
+});
+
+test("hostname normalisation matches ResultPeak byte for byte", () => {
+  // The stored document id and the lookup have to agree or a school silently
+  // disappears, so these cases are copied from ResultPeak's schoolDomains.test.
+  assert.equal(normaliseHostname("Portal.School.NG"), "portal.school.ng");
+  assert.equal(normaliseHostname("school.example.com:443"), "school.example.com");
+  assert.equal(normaliseHostname("localhost:3000"), "localhost");
+  assert.equal(normaliseHostname("school.example.com."), "school.example.com");
+  assert.equal(normaliseHostname("  School.Example.com  "), "school.example.com");
+  // A pasted URL or origin, because an admin pastes what is in the address bar.
+  assert.equal(normaliseHostname("https://school.example.com/tutor"), "school.example.com");
+  assert.equal(normaliseHostname("http://user:pw@school.example.com"), "school.example.com");
+
+  // EXACTLY ONE leading www. `www.www.x.com` is not a school's address twice.
+  assert.equal(normaliseHostname("www.portal.school.ng"), "portal.school.ng");
+  assert.equal(normaliseHostname("WWW.Portal.School.NG"), "portal.school.ng");
+  assert.equal(normaliseHostname("www.www.school.com"), "www.school.com");
+
+  // Not hostnames. "" rather than a throw: this runs on a value from the
+  // address bar, on every request.
+  for (const bad of ["", "   ", "/", "a b.com", "school..com", "-school.com", "school-.com"]) {
+    assert.equal(normaliseHostname(bad), "", `expected "" for ${JSON.stringify(bad)}`);
+  }
+  assert.equal(normaliseHostname(`${"a".repeat(64)}.com`), "", "label over 63 chars");
+  assert.equal(normaliseHostname(null), "");
+  assert.equal(normaliseHostname(undefined), "");
+
+  // Whatever comes out must be a legal Firestore document id.
+  for (const value of ["Portal.School.NG", "www.x.co.uk", "a.b.c.d.e.example.com"]) {
+    const id = normaliseHostname(value);
+    assert.ok(id && !id.includes("/") && id !== "." && id !== "..", `bad id from ${value}`);
   }
 });
 
-test("pngSize: reads IHDR, and rejects a renamed file", () => {
-  // Minimal valid PNG header: signature, then the IHDR length/type, then width
-  // and height as big-endian uint32.
-  const png = (w: number, h: number) => {
-    const b = new Uint8Array(24);
-    b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
-    const put = (at: number, v: number) => {
-      b[at] = (v >>> 24) & 0xff;
-      b[at + 1] = (v >>> 16) & 0xff;
-      b[at + 2] = (v >>> 8) & 0xff;
-      b[at + 3] = v & 0xff;
-    };
-    put(16, w);
-    put(20, h);
-    return b;
+test("a non-normalised hostname resolves once it is normalised", () => {
+  // The visitor typing `WWW.Capstone.Learn.Example.NG:8443` and the document at
+  // `capstone.learn.example.ng` must meet. This is the failure that presents as
+  // "the website stopped knowing who we are".
+  const typed = "WWW.Capstone.Learn.Example.NG:8443";
+  assert.equal(normaliseHostname(typed), "capstone.learn.example.ng");
+
+  const verdict = resolveHostMode(typed, mapped("school-a"), CONFIGURED);
+  assert.equal(verdict.mode, "school");
+  assert.equal(verdict.schoolId, "school-a");
+  assert.equal(verdict.hostname, "capstone.learn.example.ng");
+});
+
+test("a reserved label does not resolve, even with a document behind it", () => {
+  // Enforcement belongs at ResultPeak's write path. This is the other half: a
+  // document written by hand in the Firebase console must still not brand one
+  // of our own addresses as a school. Both, not either.
+  for (const label of ["www", "api", "admin", "app", "mail"]) {
+    const host = `${label}.learn.example.ng`;
+    assert.ok(
+      isReservedHost(host, CONFIGURED) || normaliseHostname(host) !== host,
+      `${label} should be reserved or rewritten`
+    );
+    const verdict = resolveHostMode(host, mapped("school-a"), CONFIGURED);
+    assert.notEqual(verdict.mode, "school", `${host} must not resolve to a school`);
+  }
+
+  // And it is never even fetched, so a hand-written document costs no read.
+  assert.equal(shouldLookUpHost("admin.learn.example.ng", CONFIGURED), false);
+
+  // SCOPED TO OUR ZONE, deliberately. `admin.someschool.com` is the school's own
+  // business; refusing it would break a legitimate purchased domain for nothing.
+  assert.equal(isReservedHost("admin.someschool.com", CONFIGURED), false);
+  assert.equal(
+    resolveHostMode("admin.someschool.com", mapped("school-a"), CONFIGURED).mode,
+    "school"
+  );
+});
+
+test("localhost and vercel previews fall back to cookie or slug behaviour", () => {
+  for (const host of [
+    "localhost",
+    "localhost:3000",
+    "127.0.0.1",
+    "jdsmartlearn-git-branch-team.vercel.app",
+    "my-app.local",
+    "thing.test",
+    "jdsmartlearn.example.com", // the shared domain itself
+  ]) {
+    assert.equal(
+      resolveHostMode(host, null, CONFIGURED).mode,
+      "platform",
+      `${host} must be a platform host`
+    );
+    // Never spend a Firestore read on a document that cannot exist. On a Spark
+    // plan shared with a live school's exam day this is the whole feature's cost.
+    assert.equal(shouldLookUpHost(host, CONFIGURED), false, `${host} must not be looked up`);
+  }
+
+  // A platform host is NEVER shown the not-set-up page: the platform is set up.
+  assert.notEqual(resolveHostMode("localhost", null, CONFIGURED).mode, "unmapped");
+});
+
+test("an unmapped hostname is unmapped, and an unconfigured deployment is not", () => {
+  const verdict = resolveHostMode("someone-elses-domain.com", null, CONFIGURED);
+  assert.equal(verdict.mode, "unmapped");
+  // It leaks nothing. There is no school id and no name to render.
+  assert.equal(verdict.schoolId, "");
+
+  // A retired address is treated as no address. `active:false` is how ResultPeak
+  // retires one without deleting the row that records it existed.
+  assert.equal(
+    resolveHostMode("old.learn.example.ng", mapped("school-a", { active: false }), CONFIGURED).mode,
+    "unmapped"
+  );
+  // A mapping with no schoolId is not a mapping.
+  assert.equal(
+    resolveHostMode("x.learn.example.ng", mapped(""), CONFIGURED).mode,
+    "unmapped"
+  );
+
+  // A deployment that has configured NEITHER a zone nor its own hosts cannot
+  // tell a tenant address from its own, so it behaves exactly as it did before
+  // this feature existed. Guessing the other way would show every visitor to the
+  // shared domain a not-set-up page, which is the entire product down.
+  assert.equal(resolveHostMode("anything.com", null, {}).mode, "platform");
+});
+
+test("printing an address picks the primary, and never blanks", () => {
+  const free = { hostname: "capstone.learn.example.ng", active: true, isPrimary: false };
+  const bought = { hostname: "portal.capstone.ng", active: true, isPrimary: true };
+
+  // Both resolve at once and indefinitely; isPrimary decides only what is
+  // PRINTED on a sign-in sheet.
+  assert.equal(printableAddress([free, bought]), "portal.capstone.ng");
+
+  // No primary: alphabetically first live address, so the printed sheet is
+  // deterministic rather than dependent on Firestore's ordering.
+  assert.equal(printableAddress([free, { ...bought, isPrimary: false }]), "capstone.learn.example.ng");
+
+  // A retired address is never printed.
+  assert.equal(printableAddress([{ ...bought, active: false }, free]), "capstone.learn.example.ng");
+
+  // "" is a normal answer: it is what every school gets until it has an address,
+  // and callers fall back to the shared domain and /s/{slug}.
+  assert.equal(printableAddress([]), "");
+  assert.equal(printableAddress([{ ...bought, active: false }]), "");
+});
+
+test("a resolved hostname beats a conflicting school cookie", () => {
+  /**
+   * THE COOKIE COLLISION. /s/{slug} remembers a school for a YEAR, so a phone
+   * that once opened school B's link would otherwise carry B onto school A's own
+   * address. The visitor typed the address; the cookie is a year-old side effect
+   * they have forgotten.
+   *
+   * brandingSchoolId() is server-only (it reads headers and cookies), so this
+   * exercises the decision it makes rather than the I/O around it. The ordering
+   * under test is the three lines in lib/routing/request-school.ts.
+   */
+  const decide = (verdict: { mode: string; schoolId: string }, cookieSchoolId: string | null) => {
+    if (verdict.mode === "school") return verdict.schoolId;
+    if (verdict.mode === "unmapped") return null;
+    return cookieSchoolId;
   };
 
-  assert.deepEqual(pngSize(png(512, 512)), { width: 512, height: 512 });
-  assert.deepEqual(pngSize(png(1024, 768)), { width: 1024, height: 768 });
+  const onSchoolA = resolveHostMode("a.learn.example.ng", mapped("school-a"), CONFIGURED);
+  assert.equal(decide(onSchoolA, "school-b"), "school-a", "hostname must beat the cookie");
 
-  // A JPEG renamed to .png. Reaching the manifest as an icon would install a
-  // broken tile on a child's home screen.
-  assert.equal(pngSize(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), null);
-  // Truncated.
-  assert.equal(pngSize(new Uint8Array([0x89, 0x50, 0x4e, 0x47])), null);
+  // On the shared domain nothing is resolved, so the cookie is all there is and
+  // today's behaviour is preserved exactly.
+  const onShared = resolveHostMode("jdsmartlearn.example.com", null, CONFIGURED);
+  assert.equal(decide(onShared, "school-b"), "school-b");
+  assert.equal(decide(onShared, null), null);
+
+  // An address nobody set up is not an invitation to guess from a stale cookie.
+  const onUnmapped = resolveHostMode("nobody.com", null, CONFIGURED);
+  assert.equal(decide(onUnmapped, "school-b"), null);
 });
 
-test("isIconCandidate: PNG, big enough, and square enough", () => {
-  const size = (w: number, h: number) => ({ width: w, height: h });
+test("a hostname is never an authorization surface", () => {
+  /**
+   * The load-bearing test. A tutor from school A on school B's hostname, and a
+   * student session likewise, must read nothing of B's.
+   *
+   * Both audiences take `schoolId` from the SESSION - a Firebase custom claim
+   * for a tutor, a signed server-verified cookie for a student - and the
+   * hostname reaches neither. What resolution returns is a branding hint, and
+   * this asserts the two values stay separate.
+   */
+  const onSchoolB = resolveHostMode("b.learn.example.ng", mapped("school-b"), CONFIGURED);
+  assert.equal(onSchoolB.schoolId, "school-b");
 
-  assert.equal(isIconCandidate("image/png", size(512, 512)), true);
-  assert.equal(isIconCandidate("image/png", size(1024, 1024)), true);
+  // The layouts read `session ? session.schoolId : await brandingSchoolId()`.
+  const brandFor = (sessionSchoolId: string | null) =>
+    sessionSchoolId ?? onSchoolB.schoolId;
 
-  // Too small for an Android install icon.
-  assert.equal(isIconCandidate("image/png", size(256, 256)), false);
-  // A wide logo becomes a letterboxed smudge at 192px.
-  assert.equal(isIconCandidate("image/png", size(1024, 512)), false);
-  // SVG is fine on screen and useless as a maskable raster icon.
-  assert.equal(isIconCandidate("image/svg+xml", size(512, 512)), false);
-  assert.equal(isIconCandidate("image/jpeg", size(512, 512)), false);
-  // No measurable size means no icon - never guess.
-  assert.equal(isIconCandidate("image/png", null), false);
+  // A tutor whose claim says school A stays on school A, for data AND branding:
+  // showing a teacher another school's crest above their own class's data is
+  // the failure docs/SCHOOL-BRANDING.md 6c exists to prevent.
+  assert.equal(brandFor("school-a"), "school-a");
+  // Same for a student session.
+  assert.equal(brandFor("school-a"), "school-a");
+  // Only with NO session does the hostname decorate anything.
+  assert.equal(brandFor(null), "school-b");
 
-  // A hair off square is still square: a 512x520 export should not be refused
-  // over 1.5%, or every hand-cropped crest fails.
-  assert.equal(isIconCandidate("image/png", size(520, 512)), true);
+  // And the verdict carries nothing else that could be mistaken for a grant:
+  // a mode, a normalised hostname for logging, and a school id for branding.
+  assert.deepEqual(Object.keys(onSchoolB).sort(), ["hostname", "mode", "schoolId"]);
 });
 
-test("crest: the size cap is small enough to load on a sign-in screen", () => {
-  // This loads before anything a child came for, on a throttled 3G link. If
-  // somebody raises it, they should have to change this line and think.
-  assert.equal(MAX_CREST_BYTES, 150 * 1024);
-  assert.equal(MIN_ICON_PX, 512);
-  // The serving allowlist and the upload allowlist must not drift apart: every
-  // type that can be uploaded must be a type that can be served back.
-  for (const type of Object.values(CREST_EXTENSIONS)) {
+test("a subdomain label is never parsed into an identity", () => {
+  /**
+   * DNS must not become an authorization surface. `capstone.learn.example.ng`
+   * resolves because a DOCUMENT says so, never because the label reads like a
+   * school. Without a mapping the label buys exactly nothing.
+   */
+  assert.equal(resolveHostMode("capstone.learn.example.ng", null, CONFIGURED).mode, "unmapped");
+  assert.equal(resolveHostMode("capstone.learn.example.ng", null, CONFIGURED).schoolId, "");
+
+  // zoneLabel exists for validation only, and refuses anything but one label.
+  assert.equal(zoneLabel("capstone.learn.example.ng", CONFIGURED.zone), "capstone");
+  assert.equal(zoneLabel("a.b.learn.example.ng", CONFIGURED.zone), "");
+  assert.equal(zoneLabel("portal.capstone.ng", CONFIGURED.zone), "");
+});
+
+test("platform hosts are parsed the way an operator will paste them", () => {
+  assert.deepEqual(
+    parsePlatformHosts("https://JD.example.com/, jd2.example.com:443 , ,"),
+    ["jd.example.com", "jd2.example.com"]
+  );
+  assert.deepEqual(parsePlatformHosts(""), []);
+  assert.deepEqual(parsePlatformHosts(undefined), []);
+});
+
+test("assertWritable refuses schoolDomains and schoolBranding by name", () => {
+  /**
+   * Named explicitly rather than left to the RESULTPEAK_OWNED loop above,
+   * because both are newer than that list and both are ones a future change
+   * would plausibly reach for.
+   *
+   * schoolDomains would land at a DETERMINISTIC id - the hostname itself - so a
+   * write from here would not create a stray row somebody could spot and
+   * delete. It would land on top of the real mapping, and afterwards neither
+   * side could tell which address a school actually configured. That is the
+   * attendance argument exactly.
+   *
+   * schoolBranding is a derived projection with exactly ONE writer in
+   * ResultPeak, which rewrites it whenever a school admin saves their profile.
+   * A write from here would be reverted silently and at an unpredictable time,
+   * which is worse than being refused.
+   */
+  assert.throws(() => assertWritable("schoolDomains"), /ResultPeak owns/);
+  assert.throws(() => assertWritable("schoolDomains/capstone.example.ng"), /ResultPeak owns/);
+  assert.throws(() => assertWritable("schoolBranding"), /ResultPeak owns/);
+  assert.throws(() => assertWritable("schoolBranding/school-a"), /ResultPeak owns/);
+
+  // The refusal has to send the reader somewhere, not just say no.
+  assert.throws(() => assertWritable("schoolDomains"), /CLAUDE\.md/);
+});
+
+test("switching schools on a device clears the student offline store", () => {
+  const capstone = { studentId: "stu-1", schoolId: "school-a" };
+
+  // Nothing changed.
+  assert.equal(ownerVerdict(capstone, "stu-1", "school-a"), "keep");
+
+  // A DIFFERENT SCHOOL WIPES. A phone carried to another school's address must
+  // not still be holding the first school's lessons - and the student check
+  // below does not catch it, because a device is only re-owned at sign-in.
+  assert.equal(ownerVerdict(capstone, "stu-1", "school-b"), "wipe");
+
+  // The rule this repo already had: a different student wipes, whatever the
+  // school. This is what protects a shared phone.
+  assert.equal(ownerVerdict(capstone, "stu-2", "school-a"), "wipe");
+  assert.equal(ownerVerdict(capstone, "stu-2", "school-b"), "wipe");
+
+  // An older store predating the field is BACKFILLED, not wiped. Its absence
+  // means "written before this existed", not "school changed"; wiping on deploy
+  // would cost every child their saved lessons for nothing.
+  assert.equal(ownerVerdict({ studentId: "stu-1" }, "stu-1", "school-a"), "backfill");
+  // ...but a different student in that same old store still wipes.
+  assert.equal(ownerVerdict({ studentId: "stu-1" }, "stu-2", "school-a"), "wipe");
+
+  // No store at all: nothing to protect, nothing to destroy.
+  assert.equal(ownerVerdict(null, "stu-1", "school-a"), "keep");
+  assert.equal(ownerVerdict(undefined, "stu-1", "school-a"), "keep");
+
+  // A caller that cannot supply a school must not trigger a wipe. Deleting a
+  // child's work because an argument was missing is the worst failure here.
+  assert.equal(ownerVerdict(capstone, "stu-1", undefined), "keep");
+  assert.equal(ownerVerdict(capstone, "stu-1", ""), "keep");
+});
+
+/* -------------------------------------------------------------------------
+ * Branding across address tiers, and branding with the network off
+ * ---------------------------------------------------------------------- */
+
+test("branding is identical on /s/{slug} and on a custom domain", () => {
+  /**
+   * THE ADDRESS TIER MUST NOT CHANGE HOW A SCHOOL LOOKS. A school still on the
+   * shared /s/{slug} address gets the same crest, colours and title as one on a
+   * domain it paid for, or "buy a domain for your own colours" becomes the shape
+   * of the product and the school that cannot afford one is visibly lesser to
+   * its own parents.
+   *
+   * The property that guarantees it is structural rather than behavioural:
+   * branding is keyed by schoolId and NOTHING in the resolution reaches the
+   * hostname. So the test is that both address tiers produce the same schoolId,
+   * and that the brand lookup takes nothing else.
+   */
+  const CONFIG = { zone: "learn.example.ng", platformHosts: ["jdsmartlearn.example.com"] };
+
+  // Tier 2/3: a hostname with a mapping.
+  const viaHostname = resolveHostMode(
+    "capstone.learn.example.ng",
+    { schoolId: "school-a", active: true, isPrimary: true },
+    CONFIG
+  );
+  // Tier 1: the shared domain, where /s/{slug} pinned the cookie instead.
+  const viaSlug = resolveHostMode("jdsmartlearn.example.com", null, CONFIG);
+  const cookieSchoolId = "school-a";
+
+  const resolvedByHostname = viaHostname.schoolId;
+  const resolvedByCookie = viaSlug.mode === "platform" ? cookieSchoolId : "";
+
+  assert.equal(resolvedByHostname, resolvedByCookie, "both tiers must resolve one school");
+
+  /**
+   * And the brand lookup is a pure function of that id. lib/branding/school is
+   * `server-only` and cannot be imported here, so this asserts the contract
+   * against the SOURCE: both resolvers take a schoolId and nothing else, and
+   * neither reaches for the request hostname. An address argument appearing in
+   * either signature is exactly the regression this test exists to catch.
+   */
+  const brandSource = readFileSync(
+    path.resolve(process.cwd(), "src/lib/branding/school.ts"),
+    "utf8"
+  );
+  assert.match(brandSource, /export function getSchoolBrand\(schoolId: string\)/);
+  assert.match(brandSource, /export function getSchoolCrest\(\s*schoolId: string\s*\)/);
+  // Nothing in the brand resolver may read a hostname, a request or a header.
+  for (const forbidden of ["headers(", "resolveHost", "hostname", "x-forwarded-host"]) {
     assert.ok(
-      (CREST_TYPES as readonly string[]).includes(type),
-      `${type} is uploadable but not servable`
+      !brandSource.includes(forbidden),
+      `branding must not depend on the address (found "${forbidden}")`
     );
   }
+});
+
+test("a crest from another product's record is validated before it reaches an img", () => {
+  // Ours: same-origin, versioned, served by our own route.
+  assert.equal(isOfflineSafeCrest("/api/schools/abc/logo?v=123"), true);
+
+  // ResultPeak stores a data URI, because it has no bucket.
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  assert.equal(isSafeCrestUrl(png), true);
+  assert.equal(isOfflineSafeCrest(png), true);
+
+  // SVG IS REFUSED, including as a data URI. An SVG is a document that can
+  // carry script, and a value arriving from another product's record has had
+  // none of this repo's null-CSP-and-nosniff serving applied to it.
+  assert.equal(isSafeCrestUrl("data:image/svg+xml;base64,PHN2Zz4="), false);
+  assert.equal(isSafeCrestUrl("data:image/svg+xml,<svg onload=alert(1)>"), false);
+
+  // Every other scheme, whether or not a browser would honour it.
+  for (const bad of [
+    "javascript:alert(1)",
+    "http://example.com/logo.png", // plain http
+    "vbscript:x",
+    "file:///etc/passwd",
+    "",
+    "   ",
+  ]) {
+    assert.equal(isSafeCrestUrl(bad), false, `${JSON.stringify(bad)} must be refused`);
+  }
+  assert.equal(isSafeCrestUrl(null), false);
+  assert.equal(isSafeCrestUrl(undefined), false);
+
+  /**
+   * A CROSS-ORIGIN https CREST IS SAFE TO RENDER BUT CANNOT SURVIVE OFFLINE.
+   * The service worker's deny-list refuses every cross-origin request as its
+   * second check and that list is not changeable for this, so the URL is dropped
+   * from the device payload rather than saved and left to fail. The child gets
+   * the school's monogram in the school's colour: text, never a broken image.
+   */
+  assert.equal(isSafeCrestUrl("https://cdn.example.com/crest.png"), true);
+  assert.equal(isOfflineSafeCrest("https://cdn.example.com/crest.png"), false);
+});
+
+test("a cached page still renders branded with the network off", () => {
+  /**
+   * What the device holds is OfflineBrand, mirrored onto the meta row by the
+   * existing sync - no new sync mechanism, and no branding endpoint to poll.
+   *
+   * The test is that the mirror is SELF-SUFFICIENT: everything needed to paint a
+   * branded shell is a value, not a fetch. A cached lesson rendering with no
+   * logo and default colours looks broken to a child who has only ever seen the
+   * branded version, so the colours in particular must not depend on the network.
+   */
+  const stored: OfflineBrand = {
+    schoolId: "school-a",
+    name: "Capstone Academy",
+    shortName: "Capstone",
+    initials: "CA",
+    // Dropped by the sync route because it could not survive offline.
+    crestUrl: null,
+    bg: "#123B7A",
+    fg: "#FFFFFF",
+    quiet: "#123B7A1A",
+  };
+
+  // The school is still named and still coloured with no network at all.
+  assert.equal(stored.name, "Capstone Academy");
+  assert.equal(stored.initials, "CA");
+  for (const value of [stored.bg, stored.fg, stored.quiet]) {
+    assert.ok(isSafeCssColour(value), `${value} must be usable as CSS with no network`);
+  }
+
+  // With no crest the monogram carries the identity, and the pair it is drawn
+  // with has to be readable - this is the degrade, so it cannot be the ugly path.
+  const checked = assertBrandColour(stored.bg);
+  assert.ok(checked.ok, "a stored school colour must still validate offline");
+
+  // Nothing personal is mirrored. This is what lets the shell be cached at all
+  // and reused for whoever picks the phone up next.
+  assert.deepEqual(
+    Object.keys(stored).sort(),
+    ["bg", "crestUrl", "fg", "initials", "name", "quiet", "schoolId", "shortName"]
+  );
+});
+
+/* -------------------------------------------------------------------------
+ * The branding handover: ResultPeak owns the record, this repo reads it
+ * ---------------------------------------------------------------------- */
+
+/** The brand resolver is server-only, so its contract is asserted from source. */
+function brandSource(): string {
+  return readFileSync(path.resolve(process.cwd(), "src/lib/branding/school.ts"), "utf8");
+}
+
+/**
+ * The same source with comments removed.
+ *
+ * Needed because the rule below is "this module must not READ the old record",
+ * and the module quite properly explains in prose that it used to. Scanning raw
+ * text would forbid the history note, which is the part a future reader most
+ * needs - the comment is what stops somebody re-adding the fallback.
+ *
+ * The `://` guard keeps a URL in a string from being eaten as a line comment.
+ */
+function brandCode(): string {
+  return brandSource()
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+test("getSchoolBrand reads ResultPeak's projection and never this repo's old record", () => {
+  const src = brandCode();
+
+  // Reads the projection, plus schools/{id} for name and isActive. Nothing else.
+  assert.match(src, /RP\.schoolBranding/);
+  assert.match(src, /RP\.schools/);
+
+  /**
+   * THE JD RECORD IS NOT CONSULTED. Not preferred, not fallen back to, not read
+   * at all - the editor and the record are gone, and a stray read would quietly
+   * resurrect the two-writers problem the handover existed to end.
+   */
+  for (const gone of [
+    "jdSchoolSettings",
+    "schoolSettings",
+    "JD.",
+    "logoKey",
+    "logoContentType",
+    "logoIsIcon",
+    "EMPTY_BRANDING",
+  ]) {
+    assert.ok(!src.includes(gone), `branding must no longer reference ${gone}`);
+  }
+
+  // And it still may not depend on the address it was served on.
+  for (const forbidden of ["headers(", "resolveHost", "x-forwarded-host"]) {
+    assert.ok(!src.includes(forbidden), `branding must not depend on the address (${forbidden})`);
+  }
+
+  // The comment stripper must not be why this passes.
+  assert.ok(src.includes("RP.schoolBranding"), "stripping comments must leave the code");
+
+  // The whole JD-side record is gone from the repo, not merely unread.
+  assert.ok(
+    !existsSync(path.resolve(process.cwd(), "src/lib/db/school-branding.ts")),
+    "the JD branding record module must be deleted, not left unread"
+  );
+  assert.ok(
+    !existsSync(path.resolve(process.cwd(), "src/app/(tutor)/tutor/settings/BrandingForm.tsx")),
+    "the JD branding editor must be deleted; a form left running is a form somebody uses"
+  );
+  assert.ok(
+    !existsSync(path.resolve(process.cwd(), "src/app/api/tutor/school-branding/route.ts")),
+    "the JD branding write route must be deleted"
+  );
+});
+
+test("faviconUrl falls back to logoUrl, because it is empty on purpose", () => {
+  /**
+   * ResultPeak sets faviconUrl only when a school's favicon DIFFERS from its
+   * crest. Storing the crest in both once produced a 155 KB document, and this
+   * record reaches a phone on 3G. So "" is the normal case and readers must
+   * fall back rather than treat it as "no crest".
+   */
+  const pick = (favicon: string, logo: string) => favicon.trim() || logo.trim() || "";
+
+  const crest = "data:image/png;base64,iVBORw0KGgo=";
+  assert.equal(pick("", crest), crest, "empty faviconUrl must fall back to logoUrl");
+  assert.equal(pick("   ", crest), crest, "whitespace is empty too");
+
+  const distinct = "data:image/png;base64,ZmF2aWNvbg==";
+  assert.equal(pick(distinct, crest), distinct, "a real faviconUrl wins");
+
+  assert.equal(pick("", ""), "", "no crest at all stays no crest");
+
+  // And the source does it in that order.
+  assert.match(brandCode(), /faviconUrl\?\.trim\(\) \|\| branding\.logoUrl\?\.trim\(\)/);
+});
+
+test("an unsafe logoUrl degrades to the monogram rather than reaching an img", () => {
+  // SVG can carry script, and a value from another product's document has had
+  // none of this repo's null-CSP-and-nosniff serving applied to it.
+  assert.equal(isSafeCrestUrl("data:image/svg+xml;base64,PHN2Zz4="), false);
+  assert.equal(decodeCrestDataUri("data:image/svg+xml;base64,PHN2Zz4="), null);
+
+  assert.equal(isSafeCrestUrl("javascript:alert(1)"), false);
+  assert.equal(decodeCrestDataUri("javascript:alert(1)"), null);
+
+  // An https crest is safe to RENDER but is never fetched and proxied by us:
+  // fetching an arbitrary URL out of a Firestore document, server-side, is a
+  // request-forgery primitive aimed at whatever an admin typed.
+  assert.equal(isSafeCrestUrl("https://cdn.example.com/crest.png"), true);
+  assert.equal(decodeCrestDataUri("https://cdn.example.com/crest.png"), null);
+
+  // A real crest decodes to bytes and a type.
+  const decoded = decodeCrestDataUri("data:image/png;base64,iVBORw0KGgo=");
+  assert.ok(decoded, "a png data URI must decode");
+  assert.equal(decoded!.contentType, "image/png");
+  assert.ok(decoded!.body.length > 0);
+  // The serving allowlist is what decides what a browser executes.
+  assert.ok((CREST_TYPES as readonly string[]).includes(decoded!.contentType));
+
+  // Empty payloads are refused rather than served as a zero-byte image.
+  assert.equal(decodeCrestDataUri("data:image/png;base64,"), null);
+});
+
+test("a crest URL changes only when the crest bytes change", () => {
+  /**
+   * `logoUpdatedAt` moves only when the bytes move; `updatedAt` moves on every
+   * save of anything. Keying on the wrong one would rewrite every child's device
+   * store whenever a school fixed a typo in its motto.
+   *
+   * The device store entry is the URL. Identical URL means an identical
+   * /api/student/sync body, an identical ETag, a 304, and no write.
+   */
+  const before = crestUrlFor("school-a", 0);
+  const unchanged = crestUrlFor("school-a", 0);
+  const after = crestUrlFor("school-a", 1756400000000);
+
+  assert.equal(before, unchanged, "an unmoved logoUpdatedAt must not rewrite the store");
+  assert.notEqual(before, after, "a moved logoUpdatedAt must bust the cached crest");
+
+  // 0 is the version every school carries today. It is a stable key, never
+  // "unknown": a crest only changes through a save, and a save stamps the field.
+  assert.match(before, /\?v=0$/);
+
+  // Nonsense never produces a URL that would vary per render.
+  assert.equal(crestUrlFor("school-a", NaN), before);
+  assert.equal(crestUrlFor("school-a", Infinity), before);
+
+  // The school id is escaped: it reaches a URL path.
+  assert.ok(crestUrlFor("a/b", 0).includes("a%2Fb"));
+
+  // Same origin, so the service worker's existing allowlist covers it and the
+  // deny list needs no change.
+  assert.ok(before.startsWith("/api/schools/"));
+});
+
+test("a school with no projection renders the lockup, never blank and never stale", () => {
+  /**
+   * ResultPeak deletes schoolBranding/{id} as a stage of its school-purge
+   * cascade, so a missing projection means the school is GONE - not that it has
+   * yet to be backfilled. The resolver returns null and callers render the plain
+   * product lockup.
+   */
+  const src = brandCode();
+  // Missing school document, inactive school, and nameless school all return null.
+  assert.match(src, /if \(!schoolSnap\.exists\) return null;/);
+  assert.match(src, /isActive"\) === false\) return null;/);
+
+  // A missing projection is an EMPTY branding record, not a failure: the school
+  // still renders its own name and a derived monogram. Never blank.
+  assert.match(src, /brandingSnap\.exists\s*\?[\s\S]*?:\s*\{\}/);
+  assert.match(src, /shortenSchoolName\(name\)/);
+  assert.match(src, /initials: monogram\(name\)/);
+  // No crest means null, so SchoolMark shows the monogram - never a stale one.
+  assert.match(src, /crestUrl: hasCrest \? crestUrlFor/);
+});
+
+test("a stored colour still paints with the network off", () => {
+  // The device mirror is self-sufficient: nothing needed to paint a branded
+  // shell is a fetch. A cached lesson in default colours looks broken to a child
+  // who has only ever seen the branded version.
+  const stored: OfflineBrand = {
+    schoolId: "school-a",
+    name: "Capstone Academy",
+    shortName: "CAPSTONE",
+    initials: "CA",
+    crestUrl: "/api/schools/school-a/logo?v=0",
+    bg: "#123B7A",
+    fg: "#FFFFFF",
+    quiet: "#123B7A1A",
+  };
+
+  for (const value of [stored.bg, stored.fg, stored.quiet]) {
+    assert.ok(isSafeCssColour(value), `${value} must be usable as CSS with no network`);
+  }
+  assert.ok(assertBrandColour(stored.bg).ok);
+
+  // The crest is a same-origin URL the service worker already caches, so it
+  // survives a dead link; if it does not, SchoolMark falls through to initials.
+  assert.equal(isOfflineSafeCrest(stored.crestUrl), true);
+  assert.equal(stored.initials, "CA");
+
+  // Still nothing personal, which is what lets the shell be cached at all.
+  assert.deepEqual(
+    Object.keys(stored).sort(),
+    ["bg", "crestUrl", "fg", "initials", "name", "quiet", "schoolId", "shortName"]
+  );
 });

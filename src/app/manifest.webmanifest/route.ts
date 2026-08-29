@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { getBrandingSchoolId } from "@/lib/auth/student";
+import { brandingSchoolId } from "@/lib/routing/request-school";
 import { getSchoolBrand } from "@/lib/branding/school";
-import { getSchoolBranding } from "@/lib/db/school-branding";
 
 /**
  * The web app manifest, per school.
@@ -29,33 +28,32 @@ const PRODUCT = {
 } as const;
 
 export async function GET() {
-  const schoolId = await getBrandingSchoolId();
+  const schoolId = await brandingSchoolId();
   const brand = schoolId ? await getSchoolBrand(schoolId) : null;
 
   /**
-   * The crest becomes the installed icon only when it is a square PNG of at
-   * least 512px - measured once at upload, never here. An SVG cannot serve as
-   * an Android maskable icon, and a letterboxed logo at 192px is a smudge.
+   * NO SCHOOL CREST AS AN INSTALLED ICON, and this is a known regression with a
+   * named exit condition rather than an oversight.
    *
-   * A school that fails that test still gets its NAME on the home screen, which
-   * is most of the win, with the product tile alongside it.
+   * An installed icon has to be a square raster of at least 512px, or Android
+   * renders a smudge. ResultPeak, which has owned the crest since 2026-08-29,
+   * caps its data URI at 240px on the long edge - it is sized for a header and a
+   * sign-in screen, and the cap is what keeps the projection small enough to
+   * reach a phone on 3G. So no crest can currently satisfy the test, and
+   * measuring one here would always fail.
+   *
+   * COST TODAY: ZERO SCHOOLS. Measured 2026-08-29 across the whole project, no
+   * school had ever had an icon-eligible crest, so nothing regressed for anyone.
+   * That number is also why this is not urgent for ResultPeak.
+   *
+   * EXIT: ResultPeak stores a square crest of at least 512px and adds the
+   * eligibility flag to `schoolBranding/{id}`. Then this reads that flag and
+   * points at /api/schools/{id}/logo, which already serves the bytes.
+   *
+   * Until then a school still gets its NAME on the home screen, which is most of
+   * the win, with the product tile alongside it.
    */
-  const branding = schoolId && brand ? await getSchoolBranding(schoolId) : null;
-  const crestIsIcon = !!(branding?.logoIsIcon && brand?.crestUrl);
-
   const icons = [
-    ...(crestIsIcon
-      ? [
-          {
-            src: brand!.crestUrl!,
-            sizes: "512x512",
-            type: "image/png",
-            // "any" only. A crest is not designed for a maskable safe zone, and
-            // declaring it maskable would let Android crop the school's name off.
-            purpose: "any",
-          },
-        ]
-      : []),
     { src: "/logo-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" },
     { src: "/logo-mark.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
   ];

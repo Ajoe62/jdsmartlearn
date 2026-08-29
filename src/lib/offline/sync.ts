@@ -38,6 +38,7 @@ import {
   SYNC_STALE_MS,
 } from "./config";
 import { removeFile } from "./files";
+import { ownerVerdict } from "./owner";
 
 export { SYNC_STALE_MS };
 
@@ -100,12 +101,37 @@ export async function enforceGrace(): Promise<{ wiped: boolean }> {
 }
 
 /**
- * Drop everything if this device was last used by a different student. A shared
- * phone is the normal case in these schools, so this runs on every boot.
+ * Drop everything if this device was last used by a different student, or by a
+ * different SCHOOL. A shared phone is the normal case in these schools, so this
+ * runs on every boot.
+ *
+ * Both identities come from the server-verified session, never from the
+ * hostname. A hostname is a routing hint (lib/routing/hostname.ts) and letting
+ * one trigger a wipe would hand any stranger with a DNS record the power to
+ * erase a child's saved lessons.
+ *
+ * The school check is not redundant with the student check. A device only gets
+ * re-owned when somebody SIGNS IN, and a phone can be carried to a different
+ * school's address long before that happens - leaving one school's lessons
+ * sitting on a device now presenting as another. Signing in as a different
+ * student already wipes; a device changing school is at least as strong a
+ * signal, so it wipes too.
+ *
+ * An older store with no `schoolId` is BACKFILLED, not wiped. Its absence means
+ * "written before this field existed", which is not evidence of a school
+ * change, and wiping on deploy would cost every child their saved lessons for
+ * nothing.
  */
-export async function ensureOwner(studentId: string): Promise<void> {
+export async function ensureOwner(studentId: string, schoolId?: string): Promise<void> {
   const meta = await getMeta();
-  if (meta && meta.studentId !== studentId) await wipeContent();
+  const verdict = ownerVerdict(meta, studentId, schoolId);
+
+  if (verdict === "wipe") {
+    await wipeContent();
+    return;
+  }
+
+  if (verdict === "backfill" && meta) await setMeta({ ...meta, schoolId });
 }
 
 async function localState(): Promise<LocalLessonState[]> {
@@ -272,6 +298,7 @@ async function runSync({ force }: { force?: boolean }): Promise<SyncResult> {
 
     await setMeta({
       studentId: body.studentId,
+      schoolId: body.brand?.schoolId ?? meta?.schoolId,
       classId: body.classId,
       lastSyncAt: Date.now(),
       offlineGraceUntil: graceUntil(),

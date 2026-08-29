@@ -64,11 +64,12 @@ async function ensureSession(): Promise<{ ok: boolean; revoked: boolean }> {
 }
 
 /**
- * Called once per app open by the student layout. `studentId` comes from the
- * server-rendered session, so it is trustworthy.
+ * Called once per app open by the student layout. `studentId` and `schoolId`
+ * both come from the server-rendered session, so they are trustworthy - and
+ * neither may ever be taken from the hostname, which any stranger can choose.
  */
-export async function boot(studentId: string): Promise<BootResult> {
-  await ensureOwner(studentId);
+export async function boot(studentId: string, schoolId?: string): Promise<BootResult> {
+  await ensureOwner(studentId, schoolId);
 
   const { wiped } = await enforceGrace();
   if (wiped) {

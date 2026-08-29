@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSchoolCrest } from "@/lib/branding/school";
 import { CREST_TYPES } from "@/lib/branding/crest";
-import { getFile } from "@/lib/storage/provider";
 
 /**
  * A school's crest.
@@ -16,10 +15,11 @@ import { getFile } from "@/lib/storage/provider";
  *
  * What the exception is bounded by:
  *
- *   - The URL names a SCHOOL, never a storage key. The key is read server-side
- *     from that school's own branding record, so this can never be pointed at
- *     another object in the bucket. An arbitrary key in the path is how a route
- *     like this becomes a read primitive for everything we store.
+ *   - The URL names a SCHOOL and nothing else. There is no storage key anywhere
+ *     in this path now: the bytes are decoded from the data URI on that school's
+ *     own branding record, so there is no object store for a crafted path to
+ *     reach into. This got strictly narrower when ResultPeak took ownership of
+ *     the crest.
  *   - 404 for a school that is missing, inactive, or has no crest.
  *   - Content-Type comes from a server-side allowlist, never from the request
  *     and never from the stored object's own header.
@@ -29,7 +29,16 @@ import { getFile } from "@/lib/storage/provider";
  *
  * SVG is served with a null CSP and nosniff because an SVG is a document that
  * can carry script, and the admin who forwarded their designer's file has not
- * audited it. See lib/branding/crest.
+ * audited it. In practice SVG cannot arrive any more - ResultPeak refuses it on
+ * upload and isSafeCrestUrl refuses it on read - but the headers stay, because
+ * the day they are removed is the day somebody widens the allowlist.
+ *
+ * WHY THIS ROUTE STILL EXISTS NOW THAT THE CREST IS A DATA URI ON A DOCUMENT
+ * THIS REPO ALREADY READS. Because /api/student/sync ETags its whole response
+ * body: an 81 KB base64 crest inside it would be re-downloaded by every child in
+ * a class every time a tutor published a lesson. Serving it here instead keeps
+ * a ~50 byte versioned URL in that payload, and the service worker already
+ * caches this path. See getSchoolBrand().
  */
 export async function GET(
   _req: Request,
@@ -48,20 +57,17 @@ export async function GET(
     return NextResponse.json({ error: "No crest for this school." }, { status: 404 });
   }
 
-  const stored = await getFile(crest.key);
-  if (!stored) {
-    return NextResponse.json({ error: "No crest for this school." }, { status: 404 });
-  }
-
-  return new NextResponse(new Uint8Array(stored.body), {
+  return new NextResponse(new Uint8Array(crest.body), {
     headers: {
       "Content-Type": crest.contentType,
-      "Content-Length": String(stored.body.length),
+      "Content-Length": String(crest.body.length),
       /**
        * Immutable for a year, and freshness comes from `?v={logoUpdatedAt}` in
-       * the URL getSchoolBrand builds. A re-upload is a new URL, so there is
-       * nothing to invalidate. `public` is correct and deliberate - this is the
-       * one response in the product a shared cache may hold.
+       * the URL getSchoolBrand builds. That field moves ONLY when the crest
+       * bytes move, so a school fixing a typo in its motto does not bust every
+       * cached crest, and a new crest is a new URL with nothing to invalidate.
+       * `public` is correct and deliberate - this is the one response in the
+       * product a shared cache may hold.
        */
       "Cache-Control": "public, max-age=31536000, immutable",
       "X-Content-Type-Options": "nosniff",

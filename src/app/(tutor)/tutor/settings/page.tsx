@@ -4,9 +4,8 @@ import { getTutorSession } from "@/lib/auth/tutor";
 import { getSchool } from "@/lib/db/resultpeak";
 import { getCurrentTermSession, observedSessions } from "@/lib/db/school-settings";
 import SchoolSettingsForm from "./SchoolSettingsForm";
-import BrandingForm from "./BrandingForm";
-import { getSchoolBranding } from "@/lib/db/school-branding";
 import { getSchoolBrand } from "@/lib/branding/school";
+import { resultPeakUrl } from "@/lib/partner-links";
 
 /**
  * Assessment settings. SCHOOL ADMIN ONLY, and rarely opened.
@@ -35,11 +34,10 @@ export default async function SchoolSettingsPage() {
     );
   }
 
-  const [current, sessions, school, branding, brand] = await Promise.all([
+  const [current, sessions, school, brand] = await Promise.all([
     getCurrentTermSession(session.schoolId),
     observedSessions(session.schoolId),
     getSchool(session.schoolId),
-    getSchoolBranding(session.schoolId),
     getSchoolBrand(session.schoolId),
   ]);
 
@@ -74,22 +72,47 @@ export default async function SchoolSettingsPage() {
         assessmentTypes={assessmentTypes}
       />
 
-      {/* Branding sits under assessment settings rather than on a page of its
-          own: both are school-wide, admin-only, and opened about twice a year.
-          A second settings page would be a second thing to find. */}
-      {brand && (
-        <BrandingForm
-          schoolId={session.schoolId}
-          schoolName={brand.name}
-          current={{
-            shortName: branding.shortName,
-            colorHex: branding.colorHex,
-            motto: branding.motto,
-            crestUrl: brand.crestUrl,
-            logoIsIcon: branding.logoIsIcon,
-          }}
-        />
-      )}
+      {brand && <BrandingNotice schoolName={brand.name} />}
     </main>
+  );
+}
+
+/**
+ * Where a school's crest, colour and short name are edited: ResultPeak.
+ *
+ * THERE IS NO BRANDING FORM HERE ANY MORE, and that is the point of this
+ * notice rather than an apology for it. Branding was owned by both products for
+ * two days in August 2026, which meant two upload forms and two validators for
+ * one school's crest. ResultPeak won the decision on 2026-08-29 because its
+ * crest is a data URI on a document both products already read, and this repo's
+ * editor was removed rather than deprecated: a form left running is a form
+ * somebody uses, and then two records disagree about what a school looks like.
+ *
+ * A link when the cross-link is configured, plain text naming the screen when it
+ * is not. A dead link is worse than a sentence, because an admin clicks it.
+ */
+function BrandingNotice({ schoolName }: { schoolName: string }) {
+  const href = resultPeakUrl("/admin");
+
+  return (
+    <section className="mt-10 rounded-lg border border-line bg-surface p-4">
+      <h2 className="font-medium">Crest, colour and short name</h2>
+      <p className="mt-2 text-sm text-muted">
+        {schoolName}&rsquo;s crest, colour and short name are set once in
+        ResultPeak, under School profile, and appear in both products.
+      </p>
+      {href ? (
+        <a
+          href={href}
+          className="mt-3 inline-block text-sm font-medium text-brand hover:underline"
+        >
+          Open school profile in ResultPeak
+        </a>
+      ) : (
+        <p className="mt-3 text-sm text-muted">
+          Open ResultPeak and go to Admin, then School profile.
+        </p>
+      )}
+    </section>
   );
 }

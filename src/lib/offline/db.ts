@@ -96,6 +96,23 @@ export type OfflineBrand = {
 
 export type OfflineMeta = {
   studentId: string;
+  /**
+   * The school whose content this store holds, from the server-verified
+   * session - never from the hostname.
+   *
+   * ONE SCHOOL'S CONTENT PER DEVICE, the same rule as one student's. A phone
+   * that has moved to a different school's address must not still be holding
+   * the first school's lessons, and `studentId` alone does not catch it: the
+   * store is only re-owned when somebody signs in, and the address changes
+   * before that. Checked in ensureOwner() at boot, which is step 1 of the
+   * security ordering.
+   *
+   * Optional: a store written before this field existed has none, and is
+   * backfilled rather than wiped - an older store is not evidence of a school
+   * change, and wiping every device on deploy would cost every child their
+   * saved lessons for nothing.
+   */
+  schoolId?: string;
   classId: string;
   lastSyncAt: number;
   /** After this, cached lessons are wiped and re-sign-in is required. */

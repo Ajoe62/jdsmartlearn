@@ -1,7 +1,7 @@
 import { cache } from "react";
 import type { Metadata } from "next";
 import { getTutorSession } from "@/lib/auth/tutor";
-import { getBrandingSchoolId } from "@/lib/auth/student";
+import { brandingSchoolId } from "@/lib/routing/request-school";
 import { getSchoolBrand } from "@/lib/branding/school";
 import SignOutButton from "@/components/SignOutButton";
 import AppHeader from "@/components/ui/AppHeader";
@@ -18,8 +18,10 @@ import TutorShell from "@/components/tutor/TutorShell";
  * once opened another school's link would otherwise see that school's crest over
  * their own classes.
  *
- * getBrandingSchoolId() lives in lib/auth/student because that is where the
- * cookie is defined. It carries no student data and is not a student session.
+ * brandingSchoolId() resolves the hostname first and the cookie only after, so
+ * a member of staff who has not signed in yet sees the school whose address
+ * they typed rather than whichever school this phone last opened a link for. It
+ * carries no student data and is not a student session.
  *
  * React cache(): generateMetadata and the layout body both need this, and they
  * are two separate calls in the same request. Without it every page load
@@ -27,7 +29,7 @@ import TutorShell from "@/components/tutor/TutorShell";
  */
 const brandForRequest = cache(async () => {
   const session = await getTutorSession();
-  const schoolId = session ? session.schoolId : await getBrandingSchoolId();
+  const schoolId = session ? session.schoolId : await brandingSchoolId();
   const brand = schoolId ? await getSchoolBrand(schoolId) : null;
   return { session, brand };
 });
@@ -35,7 +37,20 @@ const brandForRequest = cache(async () => {
 export async function generateMetadata(): Promise<Metadata> {
   const { brand } = await brandForRequest();
   if (!brand) return {};
-  return { title: { default: brand.name, template: `%s · ${brand.shortName}` } };
+  return {
+    title: { default: brand.name, template: `%s · ${brand.shortName}` },
+    /**
+     * The school's crest in the tab, beside the school's name.
+     *
+     * Keyed by schoolId like everything else here, so a school on /s/{slug} and
+     * a school on a domain it bought get the same icon: the address tier must
+     * not change how a school looks.
+     *
+     * Omitted rather than defaulted when there is no crest, so Next falls back
+     * to the product icon in /app rather than rendering a broken one.
+     */
+    icons: brand.crestUrl ? { icon: brand.crestUrl } : undefined,
+  };
 }
 
 /** Tutor shell: school brand + sign-out. The sign-in page renders without the button. */

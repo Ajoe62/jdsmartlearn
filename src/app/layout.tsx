@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Outfit } from "next/font/google";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
+import NotSetUp from "@/components/NotSetUp";
+import { resolveHost } from "@/lib/routing/request-school";
 import "./globals.css";
 
 /**
@@ -44,11 +46,28 @@ export const viewport: Viewport = {
   themeColor: "#3852D6",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+/**
+ * THE NOT-SET-UP CHECK LIVES HERE, at the root, so it covers every page rather
+ * than the handful somebody remembered.
+ *
+ * It is deliberately NOT applied to route handlers under /api. A hostname is a
+ * routing hint and never a security boundary, so refusing an API call on an
+ * unmapped host would protect nothing (those routes authorize from the session,
+ * every time) while breaking a perfectly good deployment whose operator has not
+ * finished configuring PLATFORM_HOSTS. The not-set-up page is a thing a PERSON
+ * sees, and this is where people arrive.
+ *
+ * `resolveHost()` reads headers(), so every page renders dynamically from here
+ * on. That is not a regression: the front door, both shells and the manifest
+ * already read cookies, so nothing under this layout was static.
+ */
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const host = await resolveHost();
+
   return (
     <html lang="en" className={display.variable}>
       <body className="min-h-dvh">
-        {children}
+        {host.mode === "unmapped" ? <NotSetUp /> : children}
         <ServiceWorkerRegistrar />
       </body>
     </html>

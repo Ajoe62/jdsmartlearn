@@ -25,25 +25,42 @@ export default function SchoolMark({
 }) {
   const box = size === "lg" ? "h-14 w-14 text-xl" : "h-9 w-9 text-sm";
 
+  /**
+   * THE MONOGRAM IS ALWAYS RENDERED, AND THE CREST SITS ON TOP OF IT.
+   *
+   * A crest that fails to load must degrade to the school's name in text, never
+   * to a broken image (CLAUDE.md, offline rules). That happens for real: a
+   * ResultPeak-hosted https crest is cross-origin, so the service worker's
+   * deny-list refuses it and it cannot paint with the network off.
+   *
+   * Done with layering rather than an `onError` handler on purpose. This
+   * component has no "use client" and is rendered inside the offline shell as
+   * well as on the server; adding a handler would make it a client component and
+   * spend student JS budget on a fallback that CSS gives away. An `<img>` with
+   * `alt=""` that fails to load paints nothing, so what shows through is the
+   * monogram that was already there.
+   */
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg",
-        brand.crestUrl ? "bg-surface" : "bg-schoolBg text-schoolFg",
+        "relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg",
+        "bg-schoolBg text-schoolFg",
         box,
         className
       )}
       aria-hidden
     >
-      {brand.crestUrl ? (
-        /* eslint-disable-next-line @next/next/no-img-element -- the crest is served
-           by our own route with an immutable cache header; next/image would add a
-           proxy hop and a layout shift for a 40px square. */
-        <img src={brand.crestUrl} alt="" className="h-full w-full object-contain" />
-      ) : (
-        <span className="font-display font-semibold tracking-[0.01em]">
-          {brand.initials}
-        </span>
+      <span className="font-display font-semibold tracking-[0.01em]">{brand.initials}</span>
+
+      {brand.crestUrl && (
+        /* eslint-disable-next-line @next/next/no-img-element -- our own route with
+           an immutable cache header; next/image would add a proxy hop and a
+           layout shift for a 40px square, and cannot proxy a data URI at all. */
+        <img
+          src={brand.crestUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full bg-surface object-contain"
+        />
       )}
     </span>
   );

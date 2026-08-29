@@ -1,6 +1,7 @@
 import { cache } from "react";
 import type { Metadata } from "next";
-import { getBrandingSchoolId, getStudentSession } from "@/lib/auth/student";
+import { getStudentSession } from "@/lib/auth/student";
+import { brandingSchoolId } from "@/lib/routing/request-school";
 import { getSchoolBrand } from "@/lib/branding/school";
 import SignOutButton from "@/components/SignOutButton";
 import AppHeader from "@/components/ui/AppHeader";
@@ -12,10 +13,16 @@ import StudentShell from "@/components/student/StudentShell";
  *
  * THE ORDER IS THE SECURITY PROPERTY, not a preference. A signed-in student is
  * branded from the SESSION, which is signed and server-verified. Only a visitor
- * with no session falls back to the cookie, and then the worst case is a public
- * school name and crest on a sign-in form. Reversing these two would let anyone
- * put any school's identity above a child's own lessons by visiting
- * /s/{anything} first (docs/SCHOOL-BRANDING.md 6c).
+ * with no session falls back to the hostname and then the cookie, and then the
+ * worst case is a public school name and crest on a sign-in form. Reversing
+ * these would let anyone put any school's identity above a child's own lessons
+ * by visiting /s/{anything} first, or by pointing a DNS record at us
+ * (docs/SCHOOL-BRANDING.md 6c).
+ *
+ * SESSION STILL BEATS HOSTNAME, and that ordering is unchanged by school
+ * addresses. A child signed in at one school who opens another school's address
+ * keeps seeing her own school above her own lessons, which is the honest answer:
+ * the lessons on the page are hers, and the hostname decides nothing about them.
  *
  * React cache(): generateMetadata and the layout body both need this, and they
  * are two separate calls in the same request. Without it every page load
@@ -23,7 +30,7 @@ import StudentShell from "@/components/student/StudentShell";
  */
 const brandForRequest = cache(async () => {
   const session = await getStudentSession();
-  const schoolId = session ? session.schoolId : await getBrandingSchoolId();
+  const schoolId = session ? session.schoolId : await brandingSchoolId();
   const brand = schoolId ? await getSchoolBrand(schoolId) : null;
   return { session, brand };
 });
@@ -38,7 +45,20 @@ const brandForRequest = cache(async () => {
 export async function generateMetadata(): Promise<Metadata> {
   const { brand } = await brandForRequest();
   if (!brand) return {};
-  return { title: { default: brand.name, template: `%s · ${brand.shortName}` } };
+  return {
+    title: { default: brand.name, template: `%s · ${brand.shortName}` },
+    /**
+     * The school's crest in the tab, beside the school's name.
+     *
+     * Keyed by schoolId like everything else here, so a school on /s/{slug} and
+     * a school on a domain it bought get the same icon: the address tier must
+     * not change how a school looks.
+     *
+     * Omitted rather than defaulted when there is no crest, so Next falls back
+     * to the product icon in /app rather than rendering a broken one.
+     */
+    icons: brand.crestUrl ? { icon: brand.crestUrl } : undefined,
+  };
 }
 
 /**
@@ -70,7 +90,7 @@ export default async function StudentLayout({ children }: { children: React.Reac
           )
         }
       />
-      {session && <StudentShell studentId={session.studentId} />}
+      {session && <StudentShell studentId={session.studentId} schoolId={session.schoolId} />}
       {children}
     </>
   );

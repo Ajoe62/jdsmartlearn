@@ -1,25 +1,75 @@
 import "server-only";
 import { revalidateTag, unstable_cache } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
-import { JD, RP } from "@/lib/db/collections";
+import { RP } from "@/lib/db/collections";
 import { schoolSlug } from "@/lib/db/resultpeak";
-import { EMPTY_BRANDING, type SchoolBranding } from "@/lib/db/school-branding";
 import { assertBrandColour, defaultBrandColour, type BrandColour } from "./colour";
+import {
+  crestUrlFor,
+  decodeCrestDataUri,
+  isSafeCrestUrl,
+  type DecodedCrest,
+} from "./crest";
 import { monogram, shortenSchoolName } from "./monogram";
 
 /**
  * THE ONLY read of a school's branding for display. Nothing else in the codebase
- * may read `jdSchoolSettings/{id}.branding` or a school's name to render it.
+ * may read a school's branding or its name in order to render it.
  *
- * Same shape and the same reason as getCurrentTermSession() in
- * lib/db/school-settings.ts: ResultPeak stores no crest, no colour and no
- * stable slug today, so JDSmartLearn holds them. When ResultPeak ships
- * `schools/{id}.branding` (docs/resultpeak-school-branding-prompt.md), the
- * resolution order below gains one line and NOTHING ELSE IN THE CODEBASE
- * CHANGES.
+ * ============================================================================
+ * RESULTPEAK OWNS BRANDING. DECIDED 2026-08-29. THIS REPO READS AND NEVER
+ * WRITES.
+ * ============================================================================
  *
- * See docs/SCHOOL-BRANDING.md.
+ * `schools/{id}.branding` is the source of truth over there;
+ * `schoolBranding/{id}` is its public projection, written by exactly one writer
+ * in that repo immediately after the school saves. This repo reads THE
+ * PROJECTION, for three reasons:
+ *
+ *   - It is the smaller document, and it is the one ResultPeak's own signed-out
+ *     client reads. Reading the same record is what stops the two products
+ *     describing one school differently.
+ *   - It carries `logoUpdatedAt`, which moves ONLY when the crest bytes move.
+ *     That is the cache key the crest route needs; the source document has no
+ *     equivalent.
+ *   - It carries the motto, so there is nothing left that needs the source.
+ *
+ * `schools/{id}` is still read, for `name` and `isActive` only. Two document
+ * reads per school per 15 minutes, unchanged.
+ *
+ * A MISSING PROJECTION IS A REAL STATE, NOT A GAP. ResultPeak deletes
+ * `schoolBranding/{id}` as a stage of its school-purge cascade, so absent means
+ * "this school is gone". The school resolves to null and callers render the
+ * plain product lockup - never a stale crest.
+ *
+ * The previous arrangement, where this repo held its own record in
+ * `jdSchoolSettings` and its own crest in R2, is gone. No school had ever used
+ * it: measured 2026-08-29, zero crests in R2, zero `logoIsIcon`, and no
+ * `branding` map on any settings document.
+ *
+ * See docs/SCHOOL-BRANDING.md and docs/school-addresses.md.
  */
+
+/**
+ * `schoolBranding/{schoolId}`, as ResultPeak writes it.
+ *
+ * Every field is optional here even though ResultPeak writes them all: this is
+ * another product's document, and a reader that assumes a field exists breaks
+ * the day that product ships a new version first.
+ */
+interface PublicBranding {
+  displayName?: string;
+  logoUrl?: string;
+  /** Usually "". Set only when a school's favicon DIFFERS from its crest. */
+  faviconUrl?: string;
+  primaryColor?: string;
+  accentColor?: string;
+  motto?: string;
+  /** Moves only when the crest bytes change. `0` is a real value, not "unknown". */
+  logoUpdatedAt?: number;
+  /** Moves on every save of anything. NEVER key a cache on this. */
+  updatedAt?: number;
+}
 
 /** What a header, a front door or a sign-in screen needs. Never personal data. */
 export interface SchoolBrand {
@@ -30,7 +80,19 @@ export interface SchoolBrand {
   shortName: string;
   /** Two letters. Shown whenever there is no crest. */
   initials: string;
-  /** Our own authenticated-adjacent route, versioned. Null when none uploaded. */
+  /**
+   * Our own same-origin route, versioned by `logoUpdatedAt`. Null when the
+   * school has no crest.
+   *
+   * DELIBERATELY NOT THE DATA URI ITSELF, and this is the one place the two
+   * products' shapes are not simply copied. ResultPeak's crest is 77 to 81 KB of
+   * base64 on the projection. That is fine in a document and fine in IndexedDB,
+   * and it is NOT fine inside /api/student/sync, whose ETag hashes the whole
+   * response body: one tutor publishing one lesson would cost every child in the
+   * class a fresh 81 KB over 3G for a picture that had not changed. A ~50 byte
+   * versioned URL keeps the crest out of that body, and the service worker
+   * already caches this path.
+   */
   crestUrl: string | null;
   /** Shown on the school front door only. Never in the header. */
   motto: string | null;
@@ -40,7 +102,7 @@ export interface SchoolBrand {
   slug: string;
 }
 
-/** Invalidated when an admin saves branding, so a crest change is not 15 minutes late. */
+/** Invalidated when branding changes, so a crest edit is not 15 minutes late. */
 export function schoolBrandTag(schoolId: string): string {
   return `school-brand:${schoolId}`;
 }
@@ -58,29 +120,21 @@ export function revalidateSchoolBrand(schoolId: string): void {
  * put a staleness window in front of a decision about a real child's marks.
  *
  * So this reads the documents directly and caches ONLY THE PROJECTION BELOW -
- * exactly the pattern getSubjectAllocationEnforced() established. There is no
- * field mask, and reaching for one would be a mistake: `select()` is a Query
- * method rather than a DocumentReference method, and it was never the safety
- * property anyway. The invariant is that only the named fields of SchoolBrand
- * cross the cache boundary, so no cached object anywhere holds `assessmentTypes`
- * for a future caller to find. Projecting on the way out delivers that however
- * the document was fetched.
+ * exactly the pattern getSubjectAllocationEnforced() established. The invariant
+ * is that only the named fields of SchoolBrand cross the cache boundary, so no
+ * cached object anywhere holds `assessmentTypes` for a future caller to find.
  *
- * Cost: two document reads per school per 15 minutes, however many people are
- * signed in - and the tag above collapses the wait to zero on an actual edit.
- *
- * Returns null for a school that does not exist or is inactive. Callers render
- * the plain product lockup then: a pinned cookie is attacker-supplied and may
- * name anything at all.
+ * Returns null for a school that does not exist, is inactive, or has been
+ * purged. Callers render the plain product lockup then.
  */
 export function getSchoolBrand(schoolId: string): Promise<SchoolBrand | null> {
   if (!schoolId) return Promise.resolve(null);
 
   return unstable_cache(
     async (): Promise<SchoolBrand | null> => {
-      const [schoolSnap, settingsSnap] = await Promise.all([
+      const [schoolSnap, brandingSnap] = await Promise.all([
         adminDb.doc(`${RP.schools}/${schoolId}`).get(),
-        adminDb.doc(`${JD.schoolSettings}/${schoolId}`).get(),
+        adminDb.doc(`${RP.schoolBranding}/${schoolId}`).get(),
       ]);
 
       if (!schoolSnap.exists) return null;
@@ -92,41 +146,47 @@ export function getSchoolBrand(schoolId: string): Promise<SchoolBrand | null> {
       const name = schoolSnap.get("name");
       if (typeof name !== "string" || !name.trim()) return null;
 
-      /**
-       * Resolution order, and the only lines that change when ResultPeak ships
-       * its own record:
-       *
-       *   1. jdSchoolSettings/{id}.branding   <- today's source, JD-owned
-       *   2. schools/{id}.branding            <- preferred once it exists
-       *   3. derived                          <- never blank
-       */
-      const branding: SchoolBranding = {
-        ...EMPTY_BRANDING,
-        ...((settingsSnap.get("branding") ?? {}) as Partial<SchoolBranding>),
-      };
-
-      const shortName = branding.shortName?.trim() || shortenSchoolName(name);
+      const branding: PublicBranding = brandingSnap.exists
+        ? ((brandingSnap.data() ?? {}) as PublicBranding)
+        : {};
 
       /**
        * Re-validated on READ, not trusted from the document.
        *
-       * The write path validates too, but a value can predate a rule, arrive
-       * from a future ResultPeak field, or be edited in the Firebase console.
-       * A refusal here falls back to indigo rather than throwing: a bad colour
-       * must never be able to take down every page in a school.
+       * ResultPeak validates on write and again when it projects, but a value
+       * can predate a rule or be edited in the Firebase console, and this is the
+       * last point before it becomes CSS. A refusal falls back to indigo rather
+       * than throwing: a bad colour must never take down every page in a school.
        */
-      const checked = assertBrandColour(branding.colorHex);
+      const checked = assertBrandColour(branding.primaryColor?.trim() || null);
       const colour = checked.ok ? checked.colour : defaultBrandColour();
+
+      /**
+       * `faviconUrl || logoUrl`, as ResultPeak specifies. faviconUrl is "" for
+       * almost every school on purpose: storing the crest in both fields once
+       * produced a 155 KB document, and this record reaches a phone on 3G.
+       *
+       * `isSafeCrestUrl` still guards it. The value comes from another product's
+       * document and ends up in an `img src`; SVG stays refused, because an SVG
+       * is a document that can carry script.
+       */
+      const rawCrest = branding.faviconUrl?.trim() || branding.logoUrl?.trim() || "";
+      const hasCrest = isSafeCrestUrl(rawCrest);
+
+      /**
+       * `logoUpdatedAt` is `0` for every school today, and that is a STABLE key
+       * rather than a missing one: a crest can only change through a profile
+       * save, and that save stamps the field. Treat 0 as a legitimate value and
+       * never as "unknown", or every page load busts the crest cache.
+       */
+      const version = Number(branding.logoUpdatedAt ?? 0) || 0;
 
       return {
         schoolId,
         name,
-        shortName,
+        shortName: branding.displayName?.trim() || shortenSchoolName(name),
         initials: monogram(name),
-        crestUrl:
-          branding.logoKey && branding.logoUpdatedAt
-            ? `/api/schools/${encodeURIComponent(schoolId)}/logo?v=${branding.logoUpdatedAt}`
-            : null,
+        crestUrl: hasCrest ? crestUrlFor(schoolId, version) : null,
         motto: branding.motto?.trim() || null,
         colour,
         slug: schoolSlug(name),
@@ -138,34 +198,41 @@ export function getSchoolBrand(schoolId: string): Promise<SchoolBrand | null> {
 }
 
 /**
- * The storage key behind a school's crest, for the serving route only.
+ * The crest bytes behind /api/schools/{id}/logo.
  *
- * SEPARATE FROM getSchoolBrand ON PURPOSE. The R2 key must never leave the
- * server - a key on a client payload is a public bucket URL by another name
- * (CLAUDE.md, file storage) - so it is not a field on SchoolBrand and cannot be
- * reached from anything that renders.
+ * SEPARATE FROM getSchoolBrand ON PURPOSE, and it stays separate now for the
+ * opposite reason it used to. It once existed to keep an R2 storage key off any
+ * rendered payload. There is no key any more; what it keeps off the payload is
+ * 81 KB of base64, which must not ride inside the ETag'd /api/student/sync body.
  *
- * Also carries `isActive`, so the route can 404 a deactivated school without a
- * second read.
+ * Decodes the data URI here, server-side, so the route serves ordinary image
+ * bytes with an ordinary Content-Type. The browser gets a normal cacheable
+ * image, the service worker caches it as one, and a data URI never reaches a
+ * student device at all.
+ *
+ * An https crest (a school pointing at an image it already hosts) is NOT fetched
+ * and proxied. Returning null makes the route 404 and the page falls back to the
+ * monogram. Fetching an arbitrary URL from a Firestore document, server-side,
+ * would be a request forgery primitive pointed at whatever an admin typed.
  */
-export function getSchoolCrest(
-  schoolId: string
-): Promise<{ key: string; contentType: string } | null> {
+export function getSchoolCrest(schoolId: string): Promise<DecodedCrest | null> {
   if (!schoolId) return Promise.resolve(null);
 
   return unstable_cache(
-    async () => {
-      const [schoolSnap, settingsSnap] = await Promise.all([
+    async (): Promise<DecodedCrest | null> => {
+      const [schoolSnap, brandingSnap] = await Promise.all([
         adminDb.doc(`${RP.schools}/${schoolId}`).get(),
-        adminDb.doc(`${JD.schoolSettings}/${schoolId}`).get(),
+        adminDb.doc(`${RP.schoolBranding}/${schoolId}`).get(),
       ]);
 
       if (!schoolSnap.exists || schoolSnap.get("isActive") === false) return null;
+      if (!brandingSnap.exists) return null;
 
-      const branding = (settingsSnap.get("branding") ?? {}) as Partial<SchoolBranding>;
-      if (!branding.logoKey || !branding.logoContentType) return null;
+      const branding = (brandingSnap.data() ?? {}) as PublicBranding;
+      const raw = branding.faviconUrl?.trim() || branding.logoUrl?.trim() || "";
+      if (!isSafeCrestUrl(raw)) return null;
 
-      return { key: branding.logoKey, contentType: branding.logoContentType };
+      return decodeCrestDataUri(raw);
     },
     ["school-crest", schoolId],
     { revalidate: 900, tags: [schoolBrandTag(schoolId)] }

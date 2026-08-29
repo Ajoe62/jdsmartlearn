@@ -9,9 +9,44 @@ not that the school linked them out to somebody else's software. Every decision
 below is measured against that, and against the constraints in CLAUDE.md that do
 not move for it.
 
-**Status: all four phases shipped 2026-08-27.** Identity, the crest, per-school
-colour and the per-school install are live. Build notes, including the places
-this document turned out to be wrong, are in section 9.
+> ## SUPERSEDED IN PART, 2026-08-29: RESULTPEAK OWNS BRANDING
+>
+> Everything below about **where branding is stored and who edits it** is now
+> history. It is kept because it records why each decision was made, and those
+> reasons still explain the shape of the code, but do not build from it.
+>
+> **What is true now:**
+>
+> - `schools/{id}.branding` is the source of truth, in ResultPeak.
+>   `schoolBranding/{id}` is its public projection. This repo READS the
+>   projection and writes neither; `assertWritable()` refuses both.
+> - The crest is a **data URI on that projection**, not an R2 key. ResultPeak
+>   caps it at 240px on the long edge.
+> - **`jdSchoolSettings/{id}.branding`, the R2 crest, the upload form at
+>   `/tutor/settings` and `src/lib/db/school-branding.ts` are all deleted.**
+>   Sections 2, 3 and 5 below describe them in the present tense; they are gone.
+>   Nothing was lost: measured before removal, zero schools had a crest in R2 and
+>   no settings document had a `branding` map at all.
+> - `/api/schools/{id}/logo` **survives**, and is narrower than section 3
+>   describes: it takes no storage key, decodes the data URI server-side and
+>   serves bytes. It exists now to keep 81 KB of base64 out of the ETag'd
+>   `/api/student/sync` body, measured at 206 to 238 bytes against 77.6 to
+>   81.3 KB.
+> - **Section 6's PNG install icon is gone.** ResultPeak's 240px cap cannot meet
+>   the 512px an installed icon needs. Zero schools were affected. The exit
+>   condition is ResultPeak storing a 512px square crest and flagging it on the
+>   projection.
+> - A **missing projection means the school was purged**, not that it is
+>   un-backfilled. Render the product lockup, never a stale crest.
+>
+> Current design: `CLAUDE.md` (School branding rules),
+> `src/lib/branding/school.ts`, `docs/school-addresses.md`, and
+> `docs/resultpeak-school-domains-prompt.md` for the decision itself.
+
+**Status: all four phases shipped 2026-08-27, then branding ownership moved to
+ResultPeak on 2026-08-29.** Read the banner above before this document. Build
+notes, including the places this document turned out to be wrong, are in
+section 9.
 
 Related: `docs/ilumo-brand.md` (the product brand this layers on top of),
 `docs/OFFLINE-FIRST.md` (why the header is currently data-free),

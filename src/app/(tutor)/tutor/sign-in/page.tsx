@@ -1,4 +1,4 @@
-import { getBrandingSchoolId } from "@/lib/auth/student";
+import { brandingSchoolId } from "@/lib/routing/request-school";
 import { getSchoolBrand } from "@/lib/branding/school";
 import TutorSignInForm from "./TutorSignInForm";
 
@@ -23,7 +23,7 @@ import TutorSignInForm from "./TutorSignInForm";
  * see the layout, which switches to the session (docs/SCHOOL-BRANDING.md 6c).
  */
 export default async function TutorSignInPage() {
-  const schoolId = await getBrandingSchoolId();
+  const schoolId = await brandingSchoolId();
   const brand = schoolId ? await getSchoolBrand(schoolId) : null;
 
   return (
