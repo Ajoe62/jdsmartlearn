@@ -107,8 +107,11 @@ import {
 } from "../src/lib/branding/crest";
 import type { OfflineBrand } from "../src/lib/offline/db";
 import {
+  DEFAULT_DOMAIN_PRODUCT,
+  THIS_PRODUCT,
   isReservedHost,
   normaliseHostname,
+  normaliseProduct,
   parsePlatformHosts,
   printableAddress,
   resolveHostMode,
@@ -2864,6 +2867,9 @@ const mapped = (schoolId: string, over: Partial<SchoolDomainMapping> = {}): Scho
   schoolId,
   active: true,
   isPrimary: true,
+  // The default a row written before this field existed reads as. Resolution
+  // ignores it either way; see lookupSchoolDomain.
+  product: DEFAULT_DOMAIN_PRODUCT,
   ...over,
 });
 
@@ -3007,6 +3013,57 @@ test("printing an address picks the primary, and never blanks", () => {
   // and callers fall back to the shared domain and /s/{slug}.
   assert.equal(printableAddress([]), "");
   assert.equal(printableAddress([{ ...bought, active: false }]), "");
+});
+
+test("each product prints its own address", () => {
+  /**
+   * ONE COLLECTION, TWO APPS. ResultPeak and JDSmartLearn are separate Vercel
+   * projects, so a school using both holds two addresses: portal.* answers over
+   * there, learn.* answers here. Both live in schoolDomains, and before the
+   * `product` field they shared one isPrimary flag, so the alphabetical
+   * tie-break handed BOTH apps whichever sorted first. What that produced was a
+   * tutor's sign-in card for lessons naming the exam portal.
+   *
+   * ResultPeak owns the write path; this repo reads the field and filters on it.
+   */
+  const portal = {
+    hostname: "portal.capstone.ng",
+    active: true,
+    isPrimary: true,
+    product: "resultpeak",
+  };
+  const learn = {
+    hostname: "learn.capstone.ng",
+    active: true,
+    isPrimary: true,
+    product: "jdsmartlearn",
+  };
+
+  // Both primary at once, and no contradiction: each is primary for its own app.
+  assert.equal(printableAddress([portal, learn], THIS_PRODUCT), "learn.capstone.ng");
+  assert.equal(printableAddress([portal, learn], "resultpeak"), "portal.capstone.ng");
+
+  // The original defect: nothing flagged, and "learn." sorts before "portal.".
+  const unflagged = [
+    { ...portal, isPrimary: false },
+    { ...learn, isPrimary: false },
+  ];
+  assert.equal(printableAddress(unflagged, "resultpeak"), "portal.capstone.ng");
+  assert.equal(printableAddress(unflagged, THIS_PRODUCT), "learn.capstone.ng");
+
+  // A school with a results address and no lessons one prints NOTHING here, and
+  // the caller falls back to the shared domain. Printing the exam portal on a
+  // lessons card would send a child to the wrong site.
+  assert.equal(printableAddress([portal], THIS_PRODUCT), "");
+
+  // A row written before the field existed is a ResultPeak address, which is
+  // what lets the two repos deploy in either order with no migration.
+  assert.equal(normaliseProduct(undefined), DEFAULT_DOMAIN_PRODUCT);
+  assert.equal(DEFAULT_DOMAIN_PRODUCT, "resultpeak");
+  assert.equal(normaliseProduct("  JDSmartLearn "), "jdsmartlearn");
+  assert.equal(normaliseProduct("moodle"), "resultpeak");
+  assert.equal(printableAddress([{ hostname: "old.capstone.ng", active: true, isPrimary: true }]), "old.capstone.ng");
+  assert.equal(printableAddress([{ hostname: "old.capstone.ng", active: true, isPrimary: true }], THIS_PRODUCT), "");
 });
 
 test("a resolved hostname beats a conflicting school cookie", () => {
@@ -3176,7 +3233,7 @@ test("branding is identical on /s/{slug} and on a custom domain", () => {
   // Tier 2/3: a hostname with a mapping.
   const viaHostname = resolveHostMode(
     "capstone.learn.example.ng",
-    { schoolId: "school-a", active: true, isPrimary: true },
+    { schoolId: "school-a", active: true, isPrimary: true, product: THIS_PRODUCT },
     CONFIG
   );
   // Tier 1: the shared domain, where /s/{slug} pinned the cookie instead.

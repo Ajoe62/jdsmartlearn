@@ -3,10 +3,13 @@ import { unstable_cache } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
 import { RP } from "./collections";
 import {
+  THIS_PRODUCT,
   normaliseHostname,
+  normaliseProduct,
   parsePlatformHosts,
   printableAddress,
   type SchoolDomainMapping,
+  type SchoolDomainProduct,
 } from "@/lib/routing/hostname";
 
 /**
@@ -49,6 +52,14 @@ const MAX_DOMAINS_PER_SCHOOL = 25;
  * is how ResultPeak retires an address without deleting the row that records it
  * ever existed, and treating it as live would resurrect an address a school has
  * moved off.
+ *
+ * `product` IS DELIBERATELY NOT FILTERED HERE, and that is a decision rather
+ * than an omission. DNS already chose which app answers this hostname: a
+ * request only reaches this deployment because a record points here. A row
+ * labelled for the other product is therefore a mislabelled row, and refusing
+ * to resolve it would show the not-set-up page to a school whose address is
+ * working perfectly, for a field no visitor can see. The product decides what
+ * this repo PRINTS (printableSchoolAddress below) and nothing else.
  */
 export function lookupSchoolDomain(hostname: string): Promise<SchoolDomainMapping | null> {
   const host = normaliseHostname(hostname);
@@ -66,7 +77,12 @@ export function lookupSchoolDomain(hostname: string): Promise<SchoolDomainMappin
       // field in the codebase.
       if (snap.get("active") === false) return null;
 
-      return { schoolId, active: true, isPrimary: snap.get("isPrimary") === true };
+      return {
+        schoolId,
+        active: true,
+        isPrimary: snap.get("isPrimary") === true,
+        product: normaliseProduct(snap.get("product")),
+      };
     },
     ["school-domain", host],
     { revalidate: REVALIDATE_SECONDS, tags: [`school-domain:${host}`] }
@@ -86,7 +102,9 @@ export function lookupSchoolDomain(hostname: string): Promise<SchoolDomainMappin
  */
 export function schoolAddresses(
   schoolId: string
-): Promise<{ hostname: string; active: boolean; isPrimary: boolean }[]> {
+): Promise<
+  { hostname: string; active: boolean; isPrimary: boolean; product: SchoolDomainProduct }[]
+> {
   if (!schoolId) return Promise.resolve([]);
 
   return unstable_cache(
@@ -101,6 +119,9 @@ export function schoolAddresses(
         hostname: d.id,
         active: d.get("active") !== false,
         isPrimary: d.get("isPrimary") === true,
+        // Same reason the isPrimary filter is done in memory: a second equality
+        // filter would need a composite index, and this repo may not deploy one.
+        product: normaliseProduct(d.get("product")),
       }));
     },
     ["school-addresses", schoolId],
@@ -113,10 +134,15 @@ export function schoolAddresses(
  *
  * "" is a normal answer, not a failure: it is what every school gets until it
  * has an address of its own, and callers fall back to the shared domain and
- * /s/{slug}, which is what they printed before this feature existed.
+ * /s/{slug}, which is what they printed before this feature existed. It is also
+ * what a school gets when it has a ResultPeak address and no lessons one, which
+ * is the correct answer rather than a near miss: printing the exam portal on a
+ * lessons card would send a child to the wrong site.
+ *
+ * THIS_PRODUCT, always. This collection holds both apps' addresses.
  */
 export async function primaryAddress(schoolId: string): Promise<string> {
-  return printableAddress(await schoolAddresses(schoolId));
+  return printableAddress(await schoolAddresses(schoolId), THIS_PRODUCT);
 }
 
 /**

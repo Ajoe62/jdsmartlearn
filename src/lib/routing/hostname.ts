@@ -240,11 +240,50 @@ export function isReservedHost(hostname: unknown, config: PlatformConfig = {}): 
   return label ? RESERVED_HOST_LABELS.has(label) : false;
 }
 
+/**
+ * Which app an address answers for.
+ *
+ * ResultPeak and JDSmartLearn are separate Vercel projects, so one hostname
+ * cannot serve both, and a school using both holds TWO addresses. Both are
+ * written by ResultPeak, which owns this collection; this repo only reads.
+ *
+ * An ABSENT value means "resultpeak", because ResultPeak owns the only write
+ * path the collection has ever had, so every row predating the field is one of
+ * its own. That is what lets the two repos deploy in either order: deployed
+ * first, this side finds no jdsmartlearn address and falls back to the platform
+ * host plus /s/{slug}, which is what sign-in sheets printed before school
+ * addresses existed.
+ *
+ * It decides what is PRINTED and nothing else. See lookupSchoolDomain.
+ */
+export const SCHOOL_DOMAIN_PRODUCTS = ["resultpeak", "jdsmartlearn"] as const;
+export type SchoolDomainProduct = (typeof SCHOOL_DOMAIN_PRODUCTS)[number];
+export const DEFAULT_DOMAIN_PRODUCT: SchoolDomainProduct = "resultpeak";
+
+/** This repo's own product, so no caller has to spell it as a bare string. */
+export const THIS_PRODUCT: SchoolDomainProduct = "jdsmartlearn";
+
+/**
+ * A stored product value, as one of SCHOOL_DOMAIN_PRODUCTS.
+ *
+ * Falls back rather than throwing: this runs over data read back from
+ * Firestore, where a value nobody expected must still produce a printable
+ * address instead of a broken sign-in sheet. ResultPeak's write path is where a
+ * bad value is refused.
+ */
+export function normaliseProduct(value: unknown): SchoolDomainProduct {
+  const clean = String(value ?? "").trim().toLowerCase();
+  return (SCHOOL_DOMAIN_PRODUCTS as readonly string[]).includes(clean)
+    ? (clean as SchoolDomainProduct)
+    : DEFAULT_DOMAIN_PRODUCT;
+}
+
 /** What a `schoolDomains/{hostname}` document holds. ResultPeak writes these. */
 export interface SchoolDomainMapping {
   schoolId: string;
   active: boolean;
   isPrimary: boolean;
+  product: SchoolDomainProduct;
 }
 
 /** The three things a request's hostname can mean. Nothing here grants access. */
@@ -373,12 +412,21 @@ export function platformConfig(env: NodeJS.ProcessEnv = process.env): PlatformCo
  * address so the choice is deterministic, else "". A caller that gets "" prints
  * what it printed before this feature existed - the shared domain and the
  * school's /s/{slug} - which is always correct and never blank.
+ *
+ * SCOPED TO ONE PRODUCT, and every caller in this repo passes THIS_PRODUCT. A
+ * school using both apps holds a results address and a lessons address in one
+ * collection, each primary for its own app. Without the filter the alphabetical
+ * tie-break hands both apps whichever sorts first, which is how a tutor's
+ * sign-in card for lessons ends up naming the exam portal.
  */
 export function printableAddress(
-  domains: { hostname: string; active?: boolean; isPrimary?: boolean }[] = []
+  domains: { hostname: string; active?: boolean; isPrimary?: boolean; product?: unknown }[] = [],
+  product: SchoolDomainProduct = DEFAULT_DOMAIN_PRODUCT
 ): string {
+  const wanted = normaliseProduct(product);
   const live = domains
     .filter((row) => row?.active !== false && normaliseHostname(row?.hostname))
+    .filter((row) => normaliseProduct(row?.product) === wanted)
     .map((row) => ({
       hostname: normaliseHostname(row.hostname),
       isPrimary: row.isPrimary === true,

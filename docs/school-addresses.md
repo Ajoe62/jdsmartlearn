@@ -70,6 +70,36 @@ neither knows the other's.
 The two apps still link to each other: `NEXT_PUBLIC_RESULTPEAK_URL` here, and
 `VITE_JDSMARTLEARN_URL` there.
 
+### Which app an address is for: `product`
+
+`schoolDomains/{hostname}` carries `product`, valued `resultpeak` or
+`jdsmartlearn`. **An absent value means `resultpeak`**, because ResultPeak owns
+the only write path this collection has ever had, so every row predating the
+field is one of its own. Nothing needed backfilling on either side.
+
+It exists because both apps read one collection and each has to print ONE
+address. Before it, a school holding both addresses had a single `isPrimary`
+flag between them, and the alphabetical tie-break handed both apps whichever
+sorted first. What that produced was a tutor's lessons sign-in card naming the
+exam portal, and a class login sheet telling a child to sit an exam at
+`learn.theirschool.ng`.
+
+So `isPrimary` is now scoped per product: both of a school's addresses carry it
+at once, for different things. `primaryAddress()` and `printableSchoolAddress()`
+filter to `THIS_PRODUCT`, always.
+
+**Resolution ignores the field entirely** (`lookupSchoolDomain`), and that is a
+decision rather than an omission. DNS already chose which app answers a
+hostname: a request only reaches this deployment because a record points here. A
+row labelled for the other product is a mislabelled row, and refusing to resolve
+it would show the not-set-up page to a school whose address works perfectly, for
+a field no visitor can see. **Do not add that filter.**
+
+The write path is ResultPeak's, as ever. A school's lessons address is
+registered over there, with `"product":"jdsmartlearn"`, and skipping that is the
+mistake to expect: it leaves this app showing the not-set-up page on an address
+whose DNS is correct.
+
 ---
 
 ## How resolution works in this repo
@@ -270,7 +300,8 @@ must never be added to the service worker allowlist.
 ## Ownership
 
 **`schoolDomains` is ResultPeak's.** This repo reads it by document get through
-the Admin SDK and never writes it. `assertWritable()` refuses at runtime, with a
+the Admin SDK and never writes it, `product` included: the field is read and
+filtered on here, and only ever set over there. `assertWritable()` refuses at runtime, with a
 test. No rules change and no index is needed on this side.
 
 `schoolBranding` is **also ResultPeak's**, and since 2026-08-29 so is branding
