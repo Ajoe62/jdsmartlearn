@@ -49,8 +49,13 @@ function SchoolDoor({ brand }: { brand: SchoolBrand }) {
   /**
    * "" when ResultPeak is not configured, and then the row is not rendered at
    * all. See src/lib/partner-links.ts for why there is no third state.
+   *
+   * The school's own origin wins over the shared deployment when it has one, and
+   * then the slug is dropped: the hostname already names the school, and this
+   * slug is derived from the school's NAME, so sending both risks a link that
+   * contradicts itself.
    */
-  const results = resultPeakSchoolUrl(brand.slug);
+  const results = resultPeakSchoolUrl(brand.slug, brand.resultsUrl);
 
   return (
     <div className="min-h-dvh">

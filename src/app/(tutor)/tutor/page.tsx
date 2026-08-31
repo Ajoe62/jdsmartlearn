@@ -5,6 +5,7 @@ import { CardLink } from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import PageHeader, { NavPill, NavPills } from "@/components/ui/PageHeader";
 import { getTutorSession } from "@/lib/auth/tutor";
+import { getSchoolBrand } from "@/lib/branding/school";
 import { getNoticesForTutor } from "@/lib/db/announcements";
 import { getReadState } from "@/lib/db/read-state";
 import { toNoticeItem, visibleToTutor } from "@/lib/announcements/notices";
@@ -23,17 +24,24 @@ export default async function TutorDashboard() {
   const session = await getTutorSession();
   if (!session) redirect("/tutor/sign-in");
 
-  const [classes, lessons, tutorNames, noticeCandidates, readState] = await Promise.all([
-    session.isAdmin
-      ? listClassesForSchool(session.schoolId)
-      : getClassesByIds(session.assignedClasses),
-    session.isAdmin
-      ? listLessonsForSchool(session.schoolId)
-      : listLessonsForTutor(session.schoolId, session.uid),
-    session.isAdmin ? getTutorNames(session.schoolId) : Promise.resolve(null),
-    getNoticesForTutor(session.schoolId, session.uid),
-    getReadState(session.schoolId, session.uid),
-  ]);
+  const [classes, lessons, tutorNames, noticeCandidates, readState, brand] =
+    await Promise.all([
+      session.isAdmin
+        ? listClassesForSchool(session.schoolId)
+        : getClassesByIds(session.assignedClasses),
+      session.isAdmin
+        ? listLessonsForSchool(session.schoolId)
+        : listLessonsForTutor(session.schoolId, session.uid),
+      session.isAdmin ? getTutorNames(session.schoolId) : Promise.resolve(null),
+      getNoticesForTutor(session.schoolId, session.uid),
+      getReadState(session.schoolId, session.uid),
+      /**
+       * Read for one field: the school's own ResultPeak origin, if it has a
+       * domain of its own. Cached per school and already fetched by the layout
+       * on this request, so it costs no extra Firestore read in the common case.
+       */
+      getSchoolBrand(session.schoolId),
+    ]);
 
   const notices = visibleToTutor(
     noticeCandidates,
@@ -46,7 +54,11 @@ export default async function TutorDashboard() {
   // configured, and then the pill below is not rendered. No school in the path:
   // staff sign in there with their own account and their claims carry schoolId,
   // so a slug would cost a Firestore read to say what the destination knows.
-  const resultsUrl = resultPeakUrl("/admin/results");
+  //
+  // A school with its own results domain sends its staff there instead of to the
+  // shared deployment. /admin/results is a screen, not a school name, so it is
+  // kept on either host.
+  const resultsUrl = resultPeakUrl("/admin/results", brand?.resultsUrl);
 
   const hasClasses = classes.length > 0;
   // Counted from the list already in memory - no extra query, no extra read.

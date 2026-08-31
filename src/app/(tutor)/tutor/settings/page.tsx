@@ -72,7 +72,9 @@ export default async function SchoolSettingsPage() {
         assessmentTypes={assessmentTypes}
       />
 
-      {brand && <BrandingNotice schoolName={brand.name} />}
+      {brand && (
+        <BrandingNotice schoolName={brand.name} resultsUrl={brand.resultsUrl} />
+      )}
     </main>
   );
 }
@@ -91,8 +93,15 @@ export default async function SchoolSettingsPage() {
  * A link when the cross-link is configured, plain text naming the screen when it
  * is not. A dead link is worse than a sentence, because an admin clicks it.
  */
-function BrandingNotice({ schoolName }: { schoolName: string }) {
-  const href = resultPeakUrl("/admin");
+function BrandingNotice({
+  schoolName,
+  resultsUrl,
+}: {
+  schoolName: string;
+  /** The school's own ResultPeak origin, or null for the shared deployment. */
+  resultsUrl: string | null;
+}) {
+  const href = resultPeakUrl("/admin", resultsUrl);
 
   return (
     <section className="mt-10 rounded-lg border border-line bg-surface p-4">

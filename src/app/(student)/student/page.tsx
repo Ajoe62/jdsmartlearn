@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getStudentSession } from "@/lib/auth/student";
+import { getSchoolBrand } from "@/lib/branding/school";
 import { getNoticesForClass } from "@/lib/db/announcements";
 import { getReadState } from "@/lib/db/read-state";
 import { getSubjectShelf } from "@/lib/db/subject-shelf";
@@ -27,10 +28,17 @@ export default async function StudentHome() {
   const session = await getStudentSession();
   if (!session) redirect("/student/sign-in");
 
-  const [shelf, noticeCandidates, readState] = await Promise.all([
+  const [shelf, noticeCandidates, readState, brand] = await Promise.all([
     getSubjectShelf(session.schoolId, session.classId, session.studentId),
     getNoticesForClass(session.schoolId, session.classId),
     getReadState(session.schoolId, session.studentId),
+    /**
+     * Read for one field: the school's own ResultPeak origin, if it has a domain
+     * of its own. Adds no Firestore read in the common case - getSchoolBrand is
+     * cached per school for 15 minutes and the layout above has already called
+     * it on this request. Never fans out.
+     */
+    getSchoolBrand(session.schoolId),
   ]);
 
   const notices = visibleToStudent(noticeCandidates, session.classId, Date.now()).map(
@@ -39,13 +47,18 @@ export default async function StudentHome() {
 
   // Two errands, so two links: sitting an exam and reading a result sheet.
   //
-  // Neither carries the school. Both are the portal chooser or the sign-in page,
-  // NOT /s/{slug}: the deep link would need the school's slug, the session
-  // carries only its id, and looking one up would put another Firestore read on
-  // every dashboard load of every student to save one tap.
+  // Neither carries the school IN THE PATH. Both are the portal chooser or the
+  // sign-in page, NOT /s/{slug}: the deep link would need the school's slug, the
+  // session carries only its id, and looking one up would put another Firestore
+  // read on every dashboard load of every student to save one tap.
+  //
+  // The school may still carry itself in the HOST. A school with its own results
+  // domain sends a child there instead of to the shared deployment; both paths
+  // below are screens rather than school names, so they are kept either way.
   // See src/lib/partner-links.ts.
-  const examsUrl = resultPeakUrl("/start");
-  const resultsUrl = resultPeakStudentResultsUrl();
+  const own = brand?.resultsUrl;
+  const examsUrl = resultPeakUrl("/start", own);
+  const resultsUrl = resultPeakStudentResultsUrl(own);
 
   return (
     <>

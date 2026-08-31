@@ -32,6 +32,53 @@ and the dead one is a product that looks broken.
 `NEXT_PUBLIC_` is correct for our side. The value is a public URL that has to
 reach the browser and is not a secret in any sense.
 
+## The exception: a school on its own domain
+
+Added 2026-08-31, when ResultPeak began writing two optional origins onto
+`schoolBranding/{schoolId}`:
+
+| Field | What it is |
+| ----- | ---------- |
+| `resultsUrl` | The school's own ResultPeak origin, `https://host`, no path |
+| `lessonsUrl` | The school's own JDSmartLearn origin, same shape |
+
+**Absent or `""` is the normal case, not a gap to backfill.** A school without a
+domain of its own keeps landing on the shared deployment through the environment
+variable, which is what the table above still describes for almost every school.
+
+The precedence is: **the school's own origin, then the variable, then `""`.**
+Neither source is ever required. A school with its own domain links correctly on
+a deployment where the variable was never set, and a deployment with the variable
+set serves every school that has no domain. There is still no half-configured
+state, and `""` still means the caller renders nothing.
+
+Three things are worth stating because each is a way this goes wrong quietly.
+
+**On a school's own results domain, the `/s/{slug}` segment is dropped.** The
+hostname already identifies the school. Our slug is *derived from the school's
+name* (`schoolSlug`), not stored, so sending both is two answers to one question
+and a rename makes them disagree — a confident link to the wrong school. A
+*path* like `/start/student` is not a slug and is kept on either host: it answers
+"which screen", not "which school".
+
+**`resultsUrl` is re-validated on read**, in `getSchoolBrand`, to a bare https
+origin with no path, query or credentials — the same reasoning as
+`isSafeCrestUrl`. It arrives from another product's document and ends up in an
+`href` a child clicks, and a value can predate a rule or be typed into the
+Firebase console. A refusal falls back to the shared deployment rather than
+throwing: a bad origin must never take a school's results link off every screen
+at once.
+
+**`lessonsUrl` is read and deliberately not surfaced.** This repository *is*
+lessons. A link from a school's own JDSmartLearn domain to a JDSmartLearn origin
+is either a link to the current page or one that moves a signed-in child off
+their session's host. It is declared in `PublicBranding` so the field is
+documented where it is read, rather than looking like something ResultPeak forgot
+to send.
+
+Nothing here changes who writes what: `schoolBranding` is ResultPeak's document
+and this repository only ever reads it.
+
 ## Deployment order: independent, in both directions
 
 Each side reads only its own variable and renders only its own link. Neither
@@ -49,10 +96,17 @@ did.
 
 | File | Link | Destination |
 | ---- | ---- | ----------- |
-| `src/app/page.tsx` | "Open ResultPeak" | `/admin` |
+| `src/app/page.tsx` (product door) | "Open ResultPeak" | `/admin` |
+| `src/app/page.tsx` (school door) | "Results and report cards" | `/s/{slug}`, or the school's own origin bare |
 | `src/app/(tutor)/tutor/page.tsx` | "Results in ResultPeak" | `/admin/results` |
+| `src/app/(tutor)/tutor/settings/page.tsx` | "Open school profile in ResultPeak" | `/admin` |
 | `src/app/(student)/student/page.tsx` | "Take an exam" | `/start` |
 | `src/app/(student)/student/page.tsx` | "see your results" | `/start/student?next=results` |
+
+Every one of these resolves against the school's own `resultsUrl` when it has
+one, and against `NEXT_PUBLIC_RESULTPEAK_URL` otherwise. The product door is the
+one exception: nobody has told it which school this is, so there is no brand to
+read and it can only use the variable.
 
 **ResultPeak to JDSmartLearn** (the other repository)
 

@@ -11,6 +11,7 @@ import {
   type DecodedCrest,
 } from "./crest";
 import { monogram, shortenSchoolName } from "./monogram";
+import { isSafePartnerOrigin } from "@/lib/partner-links";
 
 /**
  * THE ONLY read of a school's branding for display. Nothing else in the codebase
@@ -69,6 +70,25 @@ interface PublicBranding {
   logoUpdatedAt?: number;
   /** Moves on every save of anything. NEVER key a cache on this. */
   updatedAt?: number;
+  /**
+   * The school's OWN ResultPeak origin (`https://host`, no path), for a school
+   * that runs its results service on a domain of its own.
+   *
+   * ABSENT OR "" IS THE NORMAL CASE, not a gap to backfill: most schools have no
+   * domain and land on the shared deployment through
+   * NEXT_PUBLIC_RESULTPEAK_URL. Surfaced on SchoolBrand below and used only
+   * through src/lib/partner-links.ts, which re-validates it.
+   */
+  resultsUrl?: string;
+  /**
+   * The school's own JDSmartLearn origin. READ AND DELIBERATELY NOT SURFACED:
+   * this repo IS lessons, and a link from a school's own JDSmartLearn domain
+   * back to a JDSmartLearn origin is either a link to the current page or a
+   * link that moves a signed-in child off their own session's host. It is
+   * declared so the field is documented where it is read rather than looking
+   * like something ResultPeak forgot to send.
+   */
+  lessonsUrl?: string;
 }
 
 /** What a header, a front door or a sign-in screen needs. Never personal data. */
@@ -100,6 +120,17 @@ export interface SchoolBrand {
   colour: BrandColour;
   /** The /s/{slug} link a school prints. Derived until ResultPeak stores one. */
   slug: string;
+  /**
+   * The school's own ResultPeak origin, or null - which is the common case and
+   * means "use the shared deployment", never "this school has no results".
+   *
+   * Validated to a bare https origin on read (see isSafePartnerOrigin), so a
+   * caller may put it straight into an href. Pass it to the partner-links
+   * helpers rather than joining a path onto it here: a school's own hostname
+   * already names the school, so those helpers drop the /s/{slug} segment that
+   * the shared deployment needs.
+   */
+  resultsUrl: string | null;
 }
 
 /** Invalidated when branding changes, so a crest edit is not 15 minutes late. */
@@ -181,6 +212,14 @@ export function getSchoolBrand(schoolId: string): Promise<SchoolBrand | null> {
        */
       const version = Number(branding.logoUpdatedAt ?? 0) || 0;
 
+      /**
+       * Re-validated on read, for the same reason the colour is: it arrives from
+       * another product's document and ends up in an href a child clicks. A
+       * value that is not a bare https origin resolves to null, and every link
+       * falls back to the shared deployment rather than disappearing.
+       */
+      const ownResults = branding.resultsUrl?.trim() || "";
+
       return {
         schoolId,
         name,
@@ -190,6 +229,7 @@ export function getSchoolBrand(schoolId: string): Promise<SchoolBrand | null> {
         motto: branding.motto?.trim() || null,
         colour,
         slug: schoolSlug(name),
+        resultsUrl: isSafePartnerOrigin(ownResults) ? ownResults : null,
       };
     },
     ["school-brand", schoolId],
