@@ -6,8 +6,21 @@ import { r2Configured, r2Delete, r2Get, r2Put } from "./r2";
  * src/lib/ai/provider.ts. No storage SDK is imported anywhere else; swapping
  * providers must stay a one-file change.
  *
- * Current provider: Cloudflare R2 (free tier, zero egress). Firebase Storage
- * remains forbidden - it would force the shared project onto Blaze.
+ * Current provider: Cloudflare R2 (free tier, zero egress).
+ *
+ * FIREBASE STORAGE REMAINS FORBIDDEN, and the reason is no longer the billing
+ * plan. It used to be: Storage would have forced the shared project onto Blaze.
+ * The project is moving to Blaze anyway for scheduled backups, so that argument
+ * has expired and the rule has to stand on the reasons that outlive it.
+ *
+ * 1. ZERO EGRESS. The access pattern here is a class of students re-downloading
+ *    the same lesson PDF on metered phone connections. That is the shape GCS
+ *    bills hardest for and the shape R2 charges nothing for.
+ * 2. ONE DELETION PATH. A school purge has to delete every file this product
+ *    holds. Two storage backends means two sweeps, and the second one is the one
+ *    somebody forgets - see docs/resultpeak-deletion-protocol-prompt.md.
+ * 3. SEPARATE CREDENTIALS. Files live outside the Firebase project ResultPeak
+ *    shares with us, so neither product can reach the other's objects at all.
  */
 
 /** File types we store and how to serve them. */

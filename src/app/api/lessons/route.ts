@@ -18,6 +18,7 @@ import {
 import { studentLessonsTag } from "@/lib/db/student-content";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
 import { putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
+import { lessonFileKey } from "@/lib/storage/keys";
 import type { ResultPeakClass, Topic } from "@/types";
 
 export const maxDuration = 60;
@@ -163,7 +164,7 @@ export async function POST(req: Request) {
     const storable = STORABLE_TYPES[ext];
     if (storable) {
       try {
-        const key = `lessons/${lessonId}/original${ext}`;
+        const key = lessonFileKey(session.schoolId, lessonId, ext);
         await putFile(key, Buffer.from(await file.arrayBuffer()), storable.mime);
         await setLessonFile(lessonId, {
           fileKey: key,

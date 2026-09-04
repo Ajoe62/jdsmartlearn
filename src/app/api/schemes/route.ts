@@ -11,6 +11,7 @@ import { writeAuditLog } from "@/lib/db/lessons";
 import { getClassesByIds, getSubjects, listClassesForSchool } from "@/lib/db/resultpeak";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
 import { putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
+import { schemeFileKey } from "@/lib/storage/keys";
 import type { SchemeWeek } from "@/types/schemes";
 
 export const maxDuration = 60;
@@ -164,7 +165,7 @@ export async function POST(req: Request) {
     const storable = STORABLE_TYPES[ext];
     if (storable) {
       try {
-        const key = `schemes/${session.schoolId}/${schemeId}${ext}`;
+        const key = schemeFileKey(session.schoolId, schemeId, ext);
         await putFile(key, Buffer.from(await file.arrayBuffer()), storable.mime);
         await setSchemeFile(schemeId, {
           fileKey: key,

@@ -211,9 +211,14 @@ export const RESULTPEAK_OWNED = new Set<string>([
    * (`api/_lib/branding/publicBranding.js`, "data flows one way and NEVER
    * back"). A write from here would be a second writer on a document whose whole
    * design is that it has one, and it would be silently reverted the next time a
-   * school admin saved their profile. READ it; never write it. What this repo
-   * still owns is the crest bytes in R2 and its own `jdSchoolSettings.branding`
-   * record - see lib/branding/school.ts for the resolution order.
+   * school admin saved their profile. READ it; never write it.
+   *
+   * THIS REPO OWNS NO PART OF BRANDING, including the crest bytes. It briefly
+   * had a rival record in `jdSchoolSettings.branding`, a crest in R2 and an
+   * editor of its own; all three were removed on 2026-08-29, not deprecated.
+   * `/api/schools/[schoolId]/logo` decodes the data URI on this projection - it
+   * reaches no object store, so a school purge has no branding files to sweep.
+   * See lib/branding/school.ts.
    */
   "schoolDomains", "schoolBranding",
 ]);

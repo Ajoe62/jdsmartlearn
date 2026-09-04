@@ -10,6 +10,7 @@ import {
   toStudentSubmissionPayload,
 } from "@/lib/db/submissions";
 import { putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
+import { submissionAttachmentKey } from "@/lib/storage/keys";
 import {
   MAX_SUBMISSION_FILES,
   extensionOf,
@@ -149,7 +150,13 @@ export async function POST(req: Request) {
       // unreachable; it stays because `known.mime` below must not be undefined
       // if the two lists ever drift.
       if (!known) return bad(`${file.name} is not a file type your teacher accepts.`);
-      const key = `submissions/${session.schoolId}/${assignmentId}/${session.studentId}/${attachments.length}${ext}`;
+      const key = submissionAttachmentKey(
+        session.schoolId,
+        assignmentId,
+        session.studentId,
+        attachments.length,
+        ext
+      );
       try {
         await putFile(key, Buffer.from(await file.arrayBuffer()), known.mime);
       } catch {

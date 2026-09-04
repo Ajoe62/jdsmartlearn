@@ -171,3 +171,69 @@ Already recorded in `docs/firestore-rules-to-append.md`. Without `topicId` on
 `exams/{examId}/questions/{qid}`, and stamped into `results.answers[]` at
 submission, topic-level revision recommendations cannot be derived from exam
 results and untagged history can never be back-filled.
+
+---
+
+## 5. `schoolPurge.js` deletes no JDSmartLearn collection
+
+**Severity: high. The data policy tells schools deletion cascades, and for a
+school on both products it does not.**
+
+Reported by the ResultPeak side on 2026-09-03, recorded here because it affects
+ResultPeak on its own: the promise in the policy is ResultPeak's, and it is
+untrue today for any school using both products.
+
+When a school is purged, all of this survives: `assignments` (with marking
+guides), `submissions` (children's answers), `studentProgress`, `jdCaScores`,
+`lessons`, `generatedContent`, `lessonViews`, `schemes`, `topics`,
+`jdNotifications`, `jdReadState`, `jdAuditLogs`, `jdSchoolSettings`,
+`studentLogins`, every R2 object behind them, and the JDSmartLearn half of
+`studentAcademicRecords`.
+
+**The fix is not a longer list in `schoolPurge.js`.** That is the same failure
+with the clock reset: the collection list lives in `src/lib/db/collections.ts` in
+*this* repo and grows when this product ships, so a hardcoded copy over there
+goes stale silently — which is how this defect happened. Nor can ResultPeak
+delete the R2 objects; that bucket has its own credentials and, under the storage
+boundary agreed on 2026-09-03, should stay that way.
+
+The protocol is in `docs/resultpeak-deletion-protocol-prompt.md`: deactivate,
+grace window, ResultPeak calls a JDSmartLearn purge endpoint and waits for counts,
+then finishes its own cascade. Two ordering constraints in it are load-bearing
+and are the parts most likely to be dropped as detail:
+
+- **Deactivating a school does not close this repo's tutor write path.** The
+  tutor guard reads `active` from a **custom claim**, never from a document, so
+  `schools/{id}.isActive = false` does not stop a tutor mid-session. ResultPeak
+  must revoke claims. (The student path closes on its own —
+  `refreshStudentSession()` re-reads `students/{id}` every 12 hours.)
+- **`studentAcademicRecords` must be deleted after this repo has stopped, never
+  before.** `writeContinuousAssessment` uses `set(..., { merge: true })`, and a
+  merge-set **recreates a deleted document**. Delete it first and one in-flight
+  finalisation resurrects a purged child's record carrying only the CA half.
+
+### Found from this side while scoping it
+
+R2 keys in this repo are not uniformly school-scoped:
+
+| Key | Prefix-scannable by school |
+|---|---|
+| `schemes/{schoolId}/{schemeId}{ext}` | yes |
+| `submissions/{schoolId}/{assignmentId}/{studentId}/{n}{ext}` | yes |
+| `lessons/{lessonId}/original{ext}` | **no** |
+
+Document enumeration is the correct primitive for a purge either way — the
+`fileKey` on the document is the source of truth, not a prefix listing. But
+without the prefix there is no cheap way to *verify* afterwards that a school's
+lesson files are gone.
+
+**Fixed on this side, 2026-09-03.** New lesson files are written to
+`lessons/{schoolId}/{lessonId}/original{ext}` through the shared builders in
+`src/lib/storage/keys.ts`, which all four upload routes now use. Historic keys
+are untouched and keep working, since the key is always read from the document
+and never rebuilt from parts; `prefixedBySchool` stays `false` for `lessons` in
+the purge plan until those historic objects are gone, because the flag describes
+what is in the bucket rather than what the builder does.
+
+`npm run report:purge -- <schoolId>` reports all of the above per school,
+read-only. Against CAPSTONE ACADEMY on 2026-09-03: 97 rows, 2 files, 18 reads.

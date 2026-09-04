@@ -9,6 +9,7 @@ import {
 import { getLesson, setLessonFile, writeAuditLog } from "@/lib/db/lessons";
 import { studentLessonsTag, lessonViewTag } from "@/lib/db/student-content";
 import { deleteFile, putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
+import { lessonFileKey } from "@/lib/storage/keys";
 
 export const maxDuration = 60;
 
@@ -65,7 +66,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     );
   }
 
-  const key = `lessons/${id}/original${ext}`;
+  /**
+   * A REPLACEMENT MOVES TO THE NEW, SCHOOL-PREFIXED KEY even when the lesson
+   * already has a file at a historic one. The old object is removed below by
+   * the same branch that already handles a changed extension, because the
+   * comparison is against the stored key rather than the extension.
+   */
+  const key = lessonFileKey(session.schoolId, id, ext);
   try {
     await putFile(key, Buffer.from(await file.arrayBuffer()), storable.mime);
   } catch (err) {

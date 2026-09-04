@@ -127,7 +127,9 @@ and recording the real fix.
 5. **Authorize server-side on every request.** A tutor may only touch classes in their `assignedClasses[]`. A student may only read published lessons for their own `classId`.
 6. **Minors' data.** Collect nothing new about students. JDSmartLearn stores only `studentId` references, never names, in its own collections.
 
-## Quota rules (shared Spark plan — a runaway query can break exam day)
+## Quota rules (shared project — a runaway query can break exam day, and now bills for it)
+
+**The plan moved to Blaze on 2026-09-03, for ResultPeak's scheduled backups. Not one rule below relaxes, and the reason to hold them got stronger.** Under Spark, an unbounded query hit the free daily quota and the app degraded — bad, visible, self-limiting. Under Blaze the same query succeeds and bills, silently and without a ceiling, on a bill shared with a live product. Budget alerts notify, they do not cap; the only hard cap is a billing-disable function, which would take a paying school's exams down to save money and is therefore not a safety net anyone would let fire. **The `.limit()` is the cap.**
 
 - Every query filters by `schoolId` and has an explicit `.limit()`.
 - Never fetch a collection unbounded. Never fan out N+1 reads in a list view — denormalize instead.
@@ -341,7 +343,7 @@ one-way school notice with no reply path, and the "never a channel" rule is what
 keeps the two apart. A request to let students respond to an announcement is a
 request for chat and is still refused.
 
-**File storage: Cloudflare R2, never Firebase Storage.** Original lesson files are stored in Cloudflare R2 (free tier, zero egress) *in addition to* the extracted text — the text remains the student-facing default on slow networks. All storage access goes through `src/lib/storage/provider.ts`; no storage SDK is imported anywhere else. Files are served ONLY via the authenticated `/api/lessons/[id]/file` route (schoolId + class scoping, material-publish gating for students) — never a public bucket URL. **Firebase Storage remains forbidden** — it would force the shared project onto Blaze. If R2 credentials are absent, uploads gracefully degrade to text-only.
+**File storage: Cloudflare R2, never Firebase Storage.** Original lesson files are stored in Cloudflare R2 (free tier, zero egress) *in addition to* the extracted text — the text remains the student-facing default on slow networks. All storage access goes through `src/lib/storage/provider.ts`; no storage SDK is imported anywhere else. Files are served ONLY via the authenticated `/api/lessons/[id]/file` route (schoolId + class scoping, material-publish gating for students) — never a public bucket URL. **Firebase Storage remains forbidden, and since 2026-09-03 the reason is no longer the billing plan.** It used to be that Storage would force the shared project onto Blaze; the project is on Blaze now, so that argument has expired and the rule stands on what outlives it. Zero egress, because the access pattern is a whole class re-downloading one lesson PDF on metered phones — the exact shape GCS bills hardest for. One deletion path, because a school purge must sweep every file this product holds and a second backend is the sweep somebody forgets. And separate credentials, so neither product can reach the other's objects at all. If R2 credentials are absent, uploads gracefully degrade to text-only.
 
 **There is exactly ONE unauthenticated file route, and it is `/api/schools/[schoolId]/logo`.** It exists because the screen that most needs a school's crest is the sign-in screen, where nobody has a session yet, and a school's front door showing a grey box until you log in defeats the point of branding it. The exception is bounded and stays bounded: the URL names a **school** and nothing else. There is no storage key anywhere in the path: the bytes are decoded from the data URI on that school's own branding record in `schoolBranding`, so there is no object store for a crafted path to reach into. This got strictly narrower when ResultPeak took ownership of the crest. It 404s for a school that is missing, inactive or has no crest; the `Content-Type` comes from a server-side allowlist (`src/lib/branding/crest.ts`), never from the request or the stored object; SVG is served with a null CSP and `nosniff` because an SVG can carry script. What it returns is a logo the school prints on a uniform: no student data, no marking guide, and nothing worth enumerating. **Do not add a second route to this exception.** If another asset needs to render before sign-in, that is a design conversation, not a copy-paste.
 
@@ -349,9 +351,9 @@ request for chat and is still refused.
 
 ## Stack
 
-Next.js (App Router) · TypeScript · Tailwind · Firebase Admin SDK on server routes · Firestore + Firebase Auth (Spark plan) · Gemini free tier · Zod · deployed on Vercel.
+Next.js (App Router) · TypeScript · Tailwind · Firebase Admin SDK on server routes · Firestore + Firebase Auth (Blaze plan since 2026-09-03, previously Spark) · Gemini free tier · Zod · deployed on Vercel.
 
-Server logic lives in route handlers using the Admin SDK. There are no Cloud Functions — the project is on the Spark plan and Functions require Blaze.
+**Server logic lives in route handlers using the Admin SDK. JDSmartLearn adds no Cloud Functions**, and since 2026-09-03 that is a choice rather than a limitation — Functions became available with the Blaze move. Do not take them up here. This product deploys to Vercel; adopting Functions would split its server logic across two deploy targets, two sets of secrets and two rollback procedures, so a request would be authorized in one place and its follow-up in another. ResultPeak may use Functions freely for its own work, backups included — that is on their side of the seam.
 
 ## Interface writing
 

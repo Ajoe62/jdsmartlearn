@@ -49,8 +49,20 @@ import {
 import {
   CREST_TYPES,
 } from "../src/lib/branding/crest";
-import { JD, RESULTPEAK_OWNED } from "../src/lib/db/collections";
+import { JD, RESULTPEAK_OWNED, SHARED } from "../src/lib/db/collections";
 import { readOnlyDb } from "../src/lib/db/read-only";
+import {
+  PURGED_BY_RESULTPEAK,
+  PURGE_PLAN,
+  assertPlanCoversJd,
+  formatPurgeReport,
+} from "../src/lib/db/purge-plan";
+import {
+  lessonFileKey,
+  schemeFileKey,
+  schoolPrefix,
+  submissionAttachmentKey,
+} from "../src/lib/storage/keys";
 import {
   auditTermSessions,
   formatReport,
@@ -2201,16 +2213,29 @@ test("a write to a ResultPeak collection is refused as theirs, not merely as rea
  */
 const DIAGNOSTIC = "scripts/diagnose-term-session.ts";
 
+/**
+ * The purge report is held to the SAME standard, and needs it more.
+ *
+ * It is the file most likely to attract a write, because it lists exactly what
+ * ought to be deleted and running it puts those counts in front of somebody who
+ * wants them gone. "While we are here" is the whole risk. Deleting a school's
+ * data belongs in a reviewed route with ResultPeak's protocol agreed around it -
+ * see docs/resultpeak-deletion-protocol-prompt.md - not in the tool that counts.
+ */
+const PURGE_REPORT = "scripts/purge-report.ts";
+
+const READ_ONLY_SCRIPTS = [DIAGNOSTIC, PURGE_REPORT];
+
 /** Method calls that write. `add` catches a `Set` too, which is a fair price. */
 const WRITE_CALL = /\.(set|update|delete|create|add|batch|bulkWriter|runTransaction|recursiveDelete)\s*\(/;
 
-function diagnosticViolations(source: string): string[] {
+function diagnosticViolations(source: string, file: string = DIAGNOSTIC): string[] {
   const problems: string[] = [];
 
   const write = WRITE_CALL.exec(source);
   if (write) {
     problems.push(
-      `${DIAGNOSTIC} calls ${write[0]}, which writes. A diagnostic reports and repairs nothing.`
+      `${file} calls ${write[0]}, which writes. A diagnostic reports and repairs nothing.`
     );
   }
   /**
@@ -2225,13 +2250,13 @@ function diagnosticViolations(source: string): string[] {
   const wrapped = source.match(/readOnlyDb\(getFirestore\(\)\)/g)?.length ?? 0;
   if (handles === 0 || handles !== wrapped) {
     problems.push(
-      `${DIAGNOSTIC} has ${handles} getFirestore() call(s) and ${wrapped} wrapped in ` +
+      `${file} has ${handles} getFirestore() call(s) and ${wrapped} wrapped in ` +
         `readOnlyDb(). Every handle it holds must be the read-only one.`
     );
   }
   if (source.includes("studentAcademicRecords")) {
     problems.push(
-      `${DIAGNOSTIC} names the shared academic record. Only ResultPeak's own ` +
+      `${file} names the shared academic record. Only ResultPeak's own ` +
         `api/_lib/academicRecords.js may name that collection.`
     );
   }
@@ -3553,4 +3578,289 @@ test("a stored colour still paints with the network off", () => {
     Object.keys(stored).sort(),
     ["bg", "crestUrl", "fg", "initials", "name", "quiet", "schoolId", "shortName"]
   );
+});
+
+/* -------------------------------------------------------------------------- *
+ *  The purge plan                                                             *
+ *                                                                             *
+ *  THIS IS THE DRIFT GUARD, and it is the whole structural point of the purge *
+ *  work. ResultPeak's schoolPurge.js clears its collections against a         *
+ *  hardcoded list; this product kept adding collections and nobody updated    *
+ *  that list, so a departed school's homework and marks stayed behind with no *
+ *  error and no failing test. A second hardcoded list on this side would be   *
+ *  the same bug with the clock reset. These tests make it impossible to add a *
+ *  collection to `JD` without also saying how a purge would remove it.        *
+ * -------------------------------------------------------------------------- */
+
+test("the purge plan covers every collection this product owns", () => {
+  assertPlanCoversJd();
+
+  // The plan is the sweep, so it must also stay in step the other way: nothing
+  // in it may belong to ResultPeak, and nothing may be listed twice.
+  const named = PURGE_PLAN.map((t) => t.collection);
+  assert.equal(new Set(named).size, named.length);
+  assert.equal(named.length, Object.values(JD).length);
+  for (const name of named) assert.equal(RESULTPEAK_OWNED.has(name), false);
+});
+
+test("the plan guard refuses what it exists to refuse", () => {
+  // Not vacuous: each of these is a real way the plan goes wrong, and the point
+  // of the guard is that a build fails rather than a school's data surviving.
+  assert.throws(
+    () => assertPlanCoversJd(PURGE_PLAN.filter((t) => t.collection !== JD.submissions)),
+    /missing submissions/,
+    "dropping a collection must fail, naming it"
+  );
+  assert.throws(
+    () => assertPlanCoversJd([...PURGE_PLAN, { ...PURGE_PLAN[0]! }]),
+    /twice/,
+    "listing one collection twice must fail"
+  );
+  assert.throws(
+    () =>
+      assertPlanCoversJd([
+        ...PURGE_PLAN,
+        { collection: "students", scope: { kind: "schoolIdField" }, holds: "roster" },
+      ]),
+    /ResultPeak owns/,
+    "a ResultPeak collection in the plan must fail as theirs, not as unknown"
+  );
+  assert.throws(
+    () =>
+      assertPlanCoversJd([
+        ...PURGE_PLAN,
+        { collection: "jdSomethingNew", scope: { kind: "schoolIdField" }, holds: "?" },
+      ]),
+    /not in JD in collections\.ts/,
+    "a collection the plan knows and collections.ts does not must fail too"
+  );
+});
+
+test("the shared academic record is not this product's to delete", () => {
+  // Owned by neither platform, and ResultPeak deletes it - after this side has
+  // stopped, because writeContinuousAssessment uses set(merge) and a merge-set
+  // RECREATES a deleted document. Putting it in the plan would be the bug.
+  for (const t of PURGE_PLAN) assert.notEqual(t.collection, SHARED.studentAcademicRecords);
+  assert.ok(
+    PURGED_BY_RESULTPEAK.some((x) => x.collection === SHARED.studentAcademicRecords),
+    "it must still be NAMED in the report, or the totals read as the whole story"
+  );
+});
+
+test("file keys are pulled from every shape that carries one", () => {
+  const byName = (c: string) => PURGE_PLAN.find((t) => t.collection === c)!;
+
+  const submissions = byName(JD.submissions).files!;
+  assert.deepEqual(
+    submissions.extract({
+      attachments: [
+        { key: "submissions/s1/a1/stu1/0.jpg", name: "page1.jpg" },
+        { key: "submissions/s1/a1/stu1/1.jpg", name: "page2.jpg" },
+      ],
+    }),
+    ["submissions/s1/a1/stu1/0.jpg", "submissions/s1/a1/stu1/1.jpg"]
+  );
+  // A text-only submission has an empty array; an older one may have no field.
+  assert.deepEqual(submissions.extract({ attachments: [] }), []);
+  assert.deepEqual(submissions.extract({}), []);
+  // A malformed entry is skipped rather than throwing mid-scan: the report has
+  // to finish and show the other counts, not die on one bad row.
+  assert.deepEqual(submissions.extract({ attachments: [{ name: "no key" }, null] }), []);
+
+  const lessons = byName(JD.lessons).files!;
+  assert.deepEqual(lessons.extract({ fileKey: "lessons/sch1/l1/original.pdf" }), [
+    "lessons/sch1/l1/original.pdf",
+  ]);
+  // Text-only lessons are the common case on a slow line, and R2 may be absent.
+  assert.deepEqual(lessons.extract({}), []);
+  assert.deepEqual(lessons.extract({ fileKey: "" }), []);
+
+  assert.deepEqual(byName(JD.schemes).files!.extract({ fileKey: "schemes/sch1/x.pdf" }), [
+    "schemes/sch1/x.pdf",
+  ]);
+});
+
+test("only lesson files are unverifiable by prefix, and the plan says so", () => {
+  // The asymmetry is real and worth pinning: schemes and submissions are keyed
+  // under the school, historic lesson files are not. Deletion is unaffected -
+  // the key comes from the document - but there is no prefix to list afterwards
+  // and confirm. If this ever flips to true, the repoint is complete.
+  const unprefixed = PURGE_PLAN.filter((t) => t.files && !t.files.prefixedBySchool);
+  assert.deepEqual(
+    unprefixed.map((t) => t.collection),
+    [JD.lessons]
+  );
+});
+
+test("the report states a capped count as a floor, never as a total", () => {
+  const lines = formatPurgeReport({
+    schoolId: "sch1",
+    schoolName: "Capstone Academy",
+    schoolActive: true,
+    documentsRead: 12,
+    counts: [
+      {
+        collection: JD.submissions,
+        rows: 5000,
+        capped: true,
+        files: 40,
+        holds: "children's answers",
+        prefixedBySchool: true,
+      },
+    ],
+  }).join("\n");
+
+  // A capped scan that printed a bare number would be read as "that is all of
+  // it", and somebody would sign off a purge against a floor.
+  assert.match(lines, /5,000\+/);
+  assert.match(lines, /stopped at --max/);
+  assert.match(lines, /NOTHING WAS DELETED/);
+});
+
+test("a school missing from ResultPeak is reported, not treated as an error", () => {
+  // The reconciliation case: purged over there under the old behaviour, still
+  // holding rows here. It is the reason to run this at all, so it must read as
+  // a finding rather than as a failed lookup.
+  const lines = formatPurgeReport({
+    schoolId: "gone1",
+    schoolName: null,
+    schoolActive: null,
+    documentsRead: 3,
+    counts: [
+      {
+        collection: JD.assignments,
+        rows: 12,
+        capped: false,
+        files: 0,
+        holds: "homework",
+        prefixedBySchool: null,
+      },
+    ],
+  }).join("\n");
+
+  assert.match(lines, /NO school document/);
+  assert.match(lines, /old behaviour/);
+  assert.doesNotMatch(lines, /stopped at --max/);
+});
+
+test("the purge report writes nothing and keeps the read-only handle", () => {
+  for (const file of READ_ONLY_SCRIPTS) {
+    assert.deepEqual(diagnosticViolations(readPure(file), file), [], file);
+  }
+});
+
+test("the purge report scan rejects a write added to it", () => {
+  const clean = readPure(PURGE_REPORT);
+
+  // The file most likely to attract "while we are here, just delete them".
+  assert.equal(
+    diagnosticViolations(clean + '\nawait db.doc("x/y").delete();', PURGE_REPORT).length,
+    1
+  );
+  assert.equal(
+    diagnosticViolations(clean + "\nsnap.docs[0].ref.delete();", PURGE_REPORT).length,
+    1
+  );
+  assert.equal(
+    diagnosticViolations(clean + "\nconst w = db.bulkWriter();", PURGE_REPORT).length,
+    1,
+    "bulkWriter is how a bulk delete would arrive"
+  );
+  assert.equal(
+    diagnosticViolations(
+      clean.replace("readOnlyDb(getFirestore())", "getFirestore()"),
+      PURGE_REPORT
+    ).length,
+    1
+  );
+});
+
+test("the purge report iterates the plan instead of its own list", () => {
+  // The guard above only bites if the report actually reads PURGE_PLAN. A
+  // hardcoded loop in the script would pass every test above and still miss a
+  // collection - which is precisely the bug on ResultPeak's side.
+  const src = readPure(PURGE_REPORT);
+  assert.match(src, /for \(const target of PURGE_PLAN\)/);
+  assert.match(src, /assertPlanCoversJd\(\)/);
+});
+
+/* -------------------------------------------------------------------------- *
+ *  Storage keys                                                               *
+ * -------------------------------------------------------------------------- */
+
+test("every stored object is keyed under its school", () => {
+  // The prefix is not how a purge FINDS a file - the key is read from the
+  // document. It is how a purge can be checked afterwards, which is what turns
+  // "we deleted it" from a claim into something a school can be shown.
+  const keys = [
+    lessonFileKey("sch1", "lesson1", ".pdf"),
+    schemeFileKey("sch1", "scheme1", ".pdf"),
+    submissionAttachmentKey("sch1", "assign1", "stu1", 0, ".jpg"),
+  ];
+
+  for (const key of keys) {
+    const [collection, school] = key.split("/");
+    assert.ok(collection && collection.length > 0, key);
+    assert.equal(school, "sch1", `${key} must carry the school in its second segment`);
+    // The listable prefix a purge would check afterwards.
+    assert.ok(key.startsWith(`${collection}/${schoolPrefix("sch1")}`), key);
+  }
+
+  assert.equal(lessonFileKey("sch1", "lesson1", ".pdf"), "lessons/sch1/lesson1/original.pdf");
+  assert.equal(schemeFileKey("sch1", "scheme1", ".pdf"), "schemes/sch1/scheme1.pdf");
+  assert.equal(
+    submissionAttachmentKey("sch1", "assign1", "stu1", 2, ".jpg"),
+    "submissions/sch1/assign1/stu1/2.jpg"
+  );
+});
+
+test("a historic lesson key is left alone, not rebuilt", () => {
+  // Lessons uploaded before the repoint sit at `lessons/{lessonId}/original.pdf`
+  // with no school. Nothing migrates them and nothing may reconstruct a key from
+  // parts: reads and deletes take `fileKey` straight off the document, so the
+  // old object keeps working untouched while new uploads carry the prefix.
+  const historic = "lessons/lesson1/original.pdf";
+  assert.notEqual(historic, lessonFileKey("sch1", "lesson1", ".pdf"));
+  assert.equal(historic.split("/")[1], "lesson1", "second segment is the lesson, not a school");
+});
+
+test("the purge plan's prefix claim matches what the builders actually produce", () => {
+  // The plan tells the report which files can be verified by prefix afterwards.
+  // If that flag and these builders ever disagree, the report lies about which
+  // objects it could check - so assert them against each other rather than
+  // trusting two hand-maintained facts to stay in step.
+  const byName = (c: string) => PURGE_PLAN.find((t) => t.collection === c)!;
+  const startsWithSchool = (key: string) => key.split("/")[1] === "sch1";
+
+  assert.equal(byName(JD.schemes).files!.prefixedBySchool, true);
+  assert.equal(startsWithSchool(schemeFileKey("sch1", "s1", ".pdf")), true);
+
+  assert.equal(byName(JD.submissions).files!.prefixedBySchool, true);
+  assert.equal(startsWithSchool(submissionAttachmentKey("sch1", "a1", "st1", 0, ".jpg")), true);
+
+  // Lessons stay false while historic keys exist, even though NEW keys are now
+  // prefixed. The flag describes what is in the bucket, not what the builder
+  // does; flipping it early would claim a verification nobody can perform.
+  assert.equal(byName(JD.lessons).files!.prefixedBySchool, false);
+  assert.equal(startsWithSchool(lessonFileKey("sch1", "l1", ".pdf")), true);
+});
+
+test("the upload routes build keys through the shared builders", () => {
+  // Four routes write objects. A template string inlined in one of them is how
+  // the school prefix silently stops being universal.
+  const routes = [
+    "src/app/api/lessons/route.ts",
+    "src/app/api/lessons/[id]/file/upload/route.ts",
+    "src/app/api/schemes/route.ts",
+    "src/app/api/student/assignments/route.ts",
+  ];
+  for (const rel of routes) {
+    const src = readPure(rel);
+    assert.match(src, /from "@\/lib\/storage\/keys"/, rel);
+    assert.doesNotMatch(
+      src,
+      /const key = `/,
+      `${rel} builds a storage key inline; use the builders in lib/storage/keys.ts`
+    );
+  }
 });
