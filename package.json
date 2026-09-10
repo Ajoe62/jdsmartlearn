@@ -17,8 +17,7 @@
     "diagnose:terms": "tsx scripts/diagnose-term-session.ts",
     "report:purge": "tsx scripts/purge-report.ts",
     "list:tutors": "tsx scripts/list-tutors.ts",
-    "list:students": "tsx scripts/list-students.ts",
-    "assign:logins": "tsx scripts/assign-student-logins.ts"
+    "list:students": "tsx scripts/list-students.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1093.0",

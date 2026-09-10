@@ -150,9 +150,15 @@ export const PURGE_PLAN: readonly PurgeTarget[] = [
     holds: "which lessons were opened, and when",
   },
   {
+    /**
+     * RETIRED and no longer written; deleted outright in v0.2.0, along with this
+     * entry - see `docs/studentlogins-retirement.md`. It stays in the plan until
+     * then because the documents still exist, and a school purged in the
+     * meantime must still have them swept.
+     */
     collection: JD.studentLogins,
     scope: { kind: "schoolIdField" },
-    holds: "username aliases (no names, no access codes)",
+    holds: "retired username aliases (no names, no access codes)",
   },
   {
     collection: JD.schoolSettings,

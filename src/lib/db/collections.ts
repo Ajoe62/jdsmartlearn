@@ -9,6 +9,20 @@ export const RP = {
   classes: "classes",
   students: "students",
   studentAccess: "studentAccess",
+  /**
+   * `studentUsernames/{schoolId}_{username}` -> `{ schoolId, username, studentId,
+   * prefix, createdAt }`. ResultPeak's UNIQUENESS RESERVATION for a student
+   * username. READ ONLY here, always - this repo issues no credential at all.
+   *
+   * ResultPeak writes it in the same batch that creates the student, alongside
+   * `studentAccess/{studentId}`, because a username is a credential IDENTIFIER
+   * and the credential is theirs. One owner, one username, both products.
+   *
+   * The document id has the same shape as the retired `studentLogins`
+   * (`${schoolId}_${username}`), so sign-in stays ONE document get: no query,
+   * no composite index, one read. Read it only through `resolveUsername()`.
+   */
+  studentUsernames: "studentUsernames",
   results: "results",
   exams: "exams",
   tutors: (schoolId: string) => `schools/${schoolId}/tutors`,
@@ -60,9 +74,15 @@ export const JD = {
   lessonViews: "lessonViews",
   auditLogs: "jdAuditLogs",
   /**
-   * Credential alias only: username -> studentId, so a child types `jss3-04`
-   * instead of a 20-character document id. Holds no personal data and is not a
-   * roster - ResultPeak still owns the student and the access code.
+   * RETIRED, AND READ BY EXACTLY ONE FALLBACK BRANCH. Deleted in v0.2.0.
+   *
+   * A credential alias this repo used to mint: username -> studentId. ResultPeak
+   * now owns the username and issues it with the access code at onboarding, so
+   * nothing writes here any more and the collection has stopped growing.
+   *
+   * It survives one release only, so that a child given a JD-minted username
+   * before that cutover is not locked out the hour it deploys. See
+   * `docs/studentlogins-retirement.md` for the four things v0.2.0 deletes.
    */
   studentLogins: "studentLogins",
 
@@ -193,6 +213,18 @@ export const SHARED = {
 export const RESULTPEAK_OWNED = new Set<string>([
   "schools", "classes", "students", "studentAccess", "exams", "examTemplates",
   "results", "examSessions", "theorySubmissions", "manualScores", "termNotes",
+  /**
+   * ResultPeak's username reservation, `{schoolId}_{username}` -> `{ studentId }`,
+   * written in the same batch as `studentAccess`. NEVER WRITTEN FROM HERE, for
+   * the same reason `studentAccess` is not: a username is half of a credential,
+   * and this repo issues no credentials.
+   *
+   * The deterministic id is the `attendance` argument again. A write from here
+   * would not leave a stray row somebody could spot and delete; it would land on
+   * top of the reservation that proves a username belongs to one child, and the
+   * loser would be a real pupil holding a sheet that no longer signs them in.
+   */
+  "studentUsernames",
   "flags", "notifications", "adminAuditLogs", "studyDocuments", "admins",
   "attendance",
   /**

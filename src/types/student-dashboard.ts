@@ -543,7 +543,10 @@ export interface AssignmentListItem {
 export interface TutorSubmissionRow {
   submissionId: string;
   studentId: string;
-  /** From studentLogins, e.g. "jss3-04". Null if no alias has been issued yet. */
+  /**
+   * ResultPeak's `studentAccess.username`, e.g. "jss3-04" - the same value the
+   * school office printed. Null on a credential issued before usernames existed.
+   */
   username: string | null;
   submittedAt: number;
   status: SubmissionStatus;

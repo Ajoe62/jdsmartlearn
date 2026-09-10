@@ -28,7 +28,7 @@ JDSmartLearn runs **inside ResultPeak's existing Firebase project**. Same `proje
 
 ### Collections ResultPeak owns — READ ONLY, NEVER WRITE
 
-`schools`, `classes`, `students`, `studentAccess`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`
+`schools`, `classes`, `students`, `studentAccess`, `studentUsernames`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`
 
 Never create, update, or delete a document in any of them. Never build roster CRUD, CSV import, or a second student registry — that data already exists and ResultPeak owns it.
 
@@ -36,7 +36,7 @@ Never create, update, or delete a document in any of them. Never build roster CR
 
 ### Collections JDSmartLearn owns — read and write
 
-`topics`, `lessons`, `generatedContent`, `lessonViews`, `jdAuditLogs`, `studentLogins`,
+`topics`, `lessons`, `generatedContent`, `lessonViews`, `jdAuditLogs`, `studentLogins` (retired),
 `assignments`, `submissions`, `studentProgress`, `jdNotifications`, `jdSchoolSettings`,
 `jdCaScores`, `jdReadState`, `schemes`
 
@@ -44,11 +44,21 @@ Never create, update, or delete a document in any of them. Never build roster CR
 carries the reasoning for each. Keep the two in step: a collection that exists
 in code but not here is one nobody reviews.
 
-`studentLogins` is a **credential alias only**: `{schoolId}_{username}` → `studentId`, so a
-child types `jss3-04` instead of a 20-character document id. It is not a second student
-registry — no names, no personal data, not authoritative, regenerable from scratch. The
-username is derived from the *class*, never the child. ResultPeak still owns the student
-record and the access code, so deactivating a student there still locks them out.
+**`studentLogins` is RETIRED as of 2026-09-10 and is deleted in v0.2.0.** It was
+JDSmartLearn's own credential alias, `{schoolId}_{username}` → `studentId`, minted by a
+tutor pressing a button. That was the wrong home, and it showed: **a username is half of a
+credential, and the credential (`studentAccess`) is ResultPeak's**, so a child onboarded by
+the school office ended up holding two different usernames — one on the office's printed
+sheet, one on the card their tutor printed here.
+
+ResultPeak now issues the username with the access code, in the same batch that creates the
+student, into `studentAccess/{studentId}.username` and the reservation
+`studentUsernames/{schoolId}_{username}`. Both are read-only here. **This repo has no code
+path that creates a username, and must never regain one** — that absence is the fix, not an
+omission. `resolveUsername()` in `src/lib/db/student-logins.ts` is the only reader; its
+`studentLogins` fallback branch survives one release so the thirty children already signed
+in with a JD-minted username are not locked out, and goes with the collection.
+See `docs/studentlogins-retirement.md`.
 
 Follow ResultPeak's existing conventions exactly:
 - Flat top-level collections, never nested under `/schools/{id}/...`

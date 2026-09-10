@@ -76,8 +76,14 @@ match /lessonViews/{id} {
   allow write: if false;
 }
 
+// RETIRED, and this block goes with it in JDSmartLearn v0.2.0 - see
+// docs/studentlogins-retirement.md. Student usernames are now ResultPeak's,
+// issued into studentAccess and studentUsernames with the access code. There is
+// deliberately NO block here for studentUsernames: it is yours, it is already
+// `if false` for clients in your canonical file, and that is correct - no client
+// may read a collection that maps every username in a school.
 match /studentLogins/{id} {
-  allow read, write: if false;        // sign-in alias - Admin SDK only
+  allow read, write: if false;        // retired sign-in alias - Admin SDK only
 }
 
 match /jdAuditLogs/{id} {

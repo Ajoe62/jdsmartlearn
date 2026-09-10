@@ -3,9 +3,10 @@ import { redirect } from "next/navigation";
 import { getTutorSession } from "@/lib/auth/tutor";
 import { getClassesByIds, listClassesForSchool } from "@/lib/db/resultpeak";
 import { getStudentsInClass } from "@/lib/db/resultpeak";
-import { accessCodesFor, usernamesForStudents } from "@/lib/db/student-logins";
+import { signInsForStudents } from "@/lib/db/student-logins";
 import { printableSchoolAddress } from "@/lib/db/school-domains";
 import { getSchoolBrand } from "@/lib/branding/school";
+import { resultPeakStaffUrl } from "@/lib/partner-links";
 import SchoolMark from "@/components/ui/SchoolMark";
 import SignInCards from "./SignInCards";
 
@@ -15,8 +16,13 @@ import SignInCards from "./SignInCards";
  * Tutor-only, and it shows live access codes - this route must NEVER be added
  * to the service worker allowlist, same rule as /tutor/lessons/[id].
  *
- * Reads only. Usernames live in JDSmartLearn; the students and their codes
- * belong to ResultPeak.
+ * READS ONLY, AND EVERY VALUE ON THE SHEET IS RESULTPEAK'S. The username and
+ * the access code are two fields of one `studentAccess` document, issued
+ * together when the school office creates the student. This page cannot print a
+ * username that differs from the office's own sheet, because there is only one.
+ *
+ * There is deliberately no way to create a sign-in from here. This repo issues
+ * no credential at all - see lib/db/student-logins.ts.
  */
 export default async function SignInsPage({
   searchParams,
@@ -50,22 +56,20 @@ export default async function SignInsPage({
     .filter((s) => s.isActive !== false)
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
-  const ids = students.map((s) => s.id);
-  const [codes, usernames] = await Promise.all([
-    accessCodesFor(ids),
-    usernamesForStudents(session.schoolId, ids),
-  ]);
+  // One getAll over studentAccess: the username and the code are fields of the
+  // same document, so there is nothing to join and nothing that can disagree.
+  const signIns = await signInsForStudents(session.schoolId, students.map((s) => s.id));
 
   const ready = students
-    .filter((s) => codes.has(s.id))
+    .filter((s) => signIns.has(s.id))
     .map((s) => ({
       id: s.id,
       name: s.fullName,
-      username: usernames.get(s.id) ?? null,
-      code: codes.get(s.id)!,
+      username: signIns.get(s.id)!.username,
+      code: signIns.get(s.id)!.code,
     }));
 
-  const blocked = students.filter((s) => !codes.has(s.id)).map((s) => s.fullName);
+  const blocked = students.filter((s) => !signIns.has(s.id)).map((s) => s.fullName);
 
   /**
    * The school on the sheet comes from the SESSION, never the hostname. A tutor
@@ -99,10 +103,10 @@ export default async function SignInsPage({
       )}
 
       <SignInCards
-        classId={selected.id}
         className={selected.name}
         students={ready}
         blocked={blocked}
+        resultPeakUrl={resultPeakStaffUrl(brand?.resultsUrl) || null}
       />
     </main>
   );

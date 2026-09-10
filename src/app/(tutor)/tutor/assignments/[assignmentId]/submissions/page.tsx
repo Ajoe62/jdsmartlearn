@@ -6,7 +6,7 @@ import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
 import { getAssignment } from "@/lib/db/assignments";
 import { listSubmissionsForAssignment } from "@/lib/db/submissions";
 import { getStudentsInClass } from "@/lib/db/resultpeak";
-import { usernamesForStudents } from "@/lib/db/student-logins";
+import { signInsForStudents } from "@/lib/db/student-logins";
 import { sweepAssignment } from "@/lib/db/grading-sweep";
 import { getSchoolSkips } from "@/lib/db/skips";
 import SkipNotices from "@/components/tutor/SkipNotices";
@@ -86,8 +86,12 @@ export default async function SubmissionsPage({
 
   // Usernames, not names. The tutor has names in ResultPeak; repeating a minor's
   // name in a JDSmartLearn surface adds personal data for no gain. Same rule as
-  // the sign-in cards.
-  const usernames = await usernamesForStudents(
+  // the sign-in cards, and now the same source: ResultPeak's own `studentAccess`
+  // username, so this table names a child the way their printed sheet does.
+  //
+  // The access codes this also reads are DISCARDED here - a live credential has
+  // no business in a submissions table. One getAll either way.
+  const signIns = await signInsForStudents(
     session.schoolId,
     submissions.map((s) => s.studentId)
   );
@@ -95,7 +99,7 @@ export default async function SubmissionsPage({
   const rows: TutorSubmissionRow[] = submissions.map((s) => ({
     submissionId: s.id,
     studentId: s.studentId,
-    username: usernames.get(s.studentId) ?? null,
+    username: signIns.get(s.studentId)?.username ?? null,
     submittedAt: s.submittedAt,
     status: s.status,
     aiScore: s.aiScore,

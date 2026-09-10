@@ -1,7 +1,5 @@
 "use client";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/Button";
 
 interface StudentCard {
   id: string;
@@ -15,65 +13,58 @@ interface StudentCard {
  *
  * Codes are hidden until asked for: this is a live credential on a phone the
  * teacher may be holding in front of a class.
+ *
+ * READ-ONLY BY DESIGN. There used to be a "Create usernames" button here, and
+ * removing it is the fix rather than a simplification: a tutor pressing it
+ * minted a SECOND username for a child who already had one on the school
+ * office's printed sheet. A username is half of a credential, and credentials
+ * are issued once, by the school office, in ResultPeak. When one is missing this
+ * page says who fixes it instead of offering to.
  */
 export default function SignInCards({
-  classId,
   className,
   students,
   blocked,
+  resultPeakUrl,
 }: {
-  classId: string;
   className: string;
   students: StudentCard[];
   blocked: string[];
+  /** ResultPeak's admin area, or null when this deployment has no link to it. */
+  resultPeakUrl: string | null;
 }) {
-  const router = useRouter();
   const [showCodes, setShowCodes] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const missing = students.filter((s) => !s.username).length;
-
-  async function createUsernames() {
-    setBusy(true);
-    setError(null);
-    const res = await fetch("/api/students/logins", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ classId }),
-    });
-    if (res.ok) {
-      router.refresh();
-    } else {
-      const body = await res.json().catch(() => ({}));
-      setError(body.error ?? "We couldn't create the usernames. Try again.");
-    }
-    setBusy(false);
-  }
 
   return (
     <div className="mt-6">
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <h2 className="text-lg font-medium">{className}</h2>
-        <div className="flex gap-2">
-          {students.length > 0 && (
-            <button
-              onClick={() => setShowCodes((v) => !v)}
-              className="rounded-lg border border-line bg-surface px-3 py-2 text-sm hover:border-brand"
-            >
-              {showCodes ? "Hide codes" : "Show codes"}
-            </button>
-          )}
-          {missing > 0 && (
-            <Button onClick={createUsernames} disabled={busy}>
-              {busy ? "Creating…" : `Create ${missing} username${missing === 1 ? "" : "s"}`}
-            </Button>
-          )}
-        </div>
+        {students.length > 0 && (
+          <button
+            onClick={() => setShowCodes((v) => !v)}
+            className="rounded-lg border border-line bg-surface px-3 py-2 text-sm hover:border-brand"
+          >
+            {showCodes ? "Hide codes" : "Show codes"}
+          </button>
+        )}
       </div>
 
-      {error && (
-        <p className="mt-4 rounded-lg bg-dangerSoft px-3 py-2 text-sm text-danger">{error}</p>
+      {missing > 0 && (
+        <p className="mt-4 rounded-lg border border-line bg-canvas p-4 text-sm text-muted print:hidden">
+          {missing} student{missing === 1 ? " in" : "s in"} {className} {missing === 1 ? "has" : "have"}{" "}
+          no sign-in yet. Usernames and access codes are issued by your school office in{" "}
+          {resultPeakUrl ? (
+            <a href={resultPeakUrl} className="font-medium text-ink underline hover:text-brand">
+              ResultPeak
+            </a>
+          ) : (
+            "ResultPeak"
+          )}
+          , on the School Setup page. Ask them to run the roster import for this class; it
+          issues only what is missing and changes nobody&rsquo;s existing sign-in.
+        </p>
       )}
 
       {students.length === 0 && (

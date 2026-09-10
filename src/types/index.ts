@@ -105,12 +105,13 @@ export interface ResultPeakTutor {
 // ---------- JDSmartLearn-owned (read + write) ----------
 
 /**
- * A memorable sign-in name for a student: `jss3-04` instead of a 20-character
- * document id. Derived from the CLASS, never from the child - this collection
- * must stay free of personal data.
+ * RETIRED. The shape of a `studentLogins` document, read by one fallback branch
+ * of `resolveUsername()` and by nothing else. Delete both in v0.2.0 - see
+ * `docs/studentlogins-retirement.md`.
  *
- * Deliberately no `classId`: it would go stale the moment a student is moved,
- * and the session's class always comes from `students/{studentId}` at sign-in.
+ * A memorable sign-in name this repo used to mint: `jss3-04` instead of a
+ * 20-character document id. ResultPeak now issues the username with the access
+ * code, so nothing writes this any more.
  */
 export interface StudentLogin {
   /** Doc id is `${schoolId}_${username}`, so sign-in is one get and no query. */
