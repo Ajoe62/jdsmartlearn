@@ -134,15 +134,62 @@ export async function getTutorNames(schoolId: string): Promise<Map<string, strin
 export interface SchoolListing {
   id: string;
   name: string;
-  /** URL form of the name, for the /s/{slug} link a school puts on the board. */
+  /**
+   * The /s/{slug} link a school puts on the board. RESULTPEAK'S STORED SLUG
+   * when it has one - see canonicalSchoolSlug.
+   */
   slug: string;
+  /**
+   * The name-derived form, which STILL RESOLVES even when it is not canonical.
+   *
+   * This repo printed it on class sign-in sheets before ResultPeak's stored slug
+   * was read here, and paper does not get recalled. Kept as an accepted alias so
+   * a sheet sent home last term keeps working; never printed.
+   */
+  legacySlug: string;
 }
 
+/** The name-derived slug. A FALLBACK now - prefer canonicalSchoolSlug. */
 export function schoolSlug(name: string): string {
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * The slug to PRINT and to LINK WITH: ResultPeak's stored one, else derived.
+ *
+ * ============================================================================
+ * RESULTPEAK OWNS THE SLUG. DERIVING ONE OVER A STORED VALUE IS THE BUG THIS
+ * FIXES, AND IT WAS LIVE.
+ * ============================================================================
+ *
+ * A school's slug is stored on `schools/{id}.slug` and reserved for uniqueness
+ * in `schoolSlugs/{slug}`, both written by ResultPeak. This repo used to ignore
+ * that and recompute the slug from the school's NAME on every read, which meant
+ * the two products disagreed about a school's own address. Measured 2026-09-10,
+ * they disagreed for three of the four schools in the project:
+ *
+ *   HIGHER GROUND INTERNATIONAL GROUP OF SCHOOL  stored "higher-ground"
+ *                                                derived "higher-ground-international-group-of-school"
+ *   Mt. Cedar British International School       stored "mt-cedar"
+ *                                                derived "mt-cedar-british-international-school"
+ *   Dlink Academy (ActiveBrains)                 no stored slug - derived is correct
+ *   CAPSTONE ACADEMY                             both "capstone-academy"
+ *
+ * So every /s/{slug} link ResultPeak printed landed on this side's school
+ * PICKER, unbranded, with no error anywhere - because an unknown slug is
+ * designed to fall through to the picker. That is the same symptom as a link
+ * pointing at the shared deployment, from an unrelated cause, and the two were
+ * being reported together.
+ *
+ * A derived slug is still the answer for a school ResultPeak has not stored one
+ * for, which is a real state and not a gap: Dlink has none today.
+ */
+export function canonicalSchoolSlug(stored: unknown, name: string): string {
+  const clean = String(stored ?? "").trim().toLowerCase();
+  return clean || schoolSlug(name);
 }
 
 /**
@@ -170,7 +217,10 @@ export const getSchoolDirectory = unstable_cache(
       .map((s) => ({
         id: s.id,
         name: (counts.get(s.name) ?? 0) > 1 ? `${s.name} (${s.id.slice(0, 4)})` : s.name,
-        slug: schoolSlug(s.name),
+        // ResultPeak's stored slug, which is what it prints and links with.
+        slug: canonicalSchoolSlug(s.slug, s.name),
+        // Derived from the RAW name, before the duplicate-name suffix above.
+        legacySlug: schoolSlug(s.name),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   },
@@ -192,19 +242,29 @@ export const getSchoolDirectory = unstable_cache(
  * an unknown slug is designed to fall through to the picker.
  *
  * A document id never changes, so /s/{schoolId} is a link that cannot rot. Both
- * forms work; a school can print either. The real fix is a stored slug that
- * ResultPeak owns - docs/resultpeak-school-branding-prompt.md, task 1 - and
- * this stays afterwards regardless, because links already in circulation do not
- * get recalled.
+ * forms work; a school can print either. THE STORED SLUG THAT FIX ASKED FOR HAS
+ * SHIPPED and is now read here (canonicalSchoolSlug), and this stays regardless,
+ * because links already in circulation do not get recalled.
+ *
+ * WHICH IS ALSO WHY THE NAME-DERIVED FORM STILL RESOLVES. It is no longer what
+ * this repo prints, but it is what it printed on class sign-in sheets before the
+ * stored slug was read, and a sheet that went home with a child last term has to
+ * keep working. Matched second, so a stored slug always wins a collision, and
+ * still through the "exactly one" guard below - an alias must never make two
+ * schools answer to one link.
  *
  * Slug first: a slug is what a school is told to use, and an id that happened to
  * look like a slug should not shadow one.
  */
 export async function findSchool(value: string): Promise<SchoolListing | null> {
   const directory = await getSchoolDirectory();
+  const typed = value.toLowerCase();
 
-  const bySlug = directory.filter((s) => s.slug === value.toLowerCase());
+  const bySlug = directory.filter((s) => s.slug === typed);
   if (bySlug.length === 1) return bySlug[0];
+
+  const byLegacy = directory.filter((s) => s.legacySlug === typed);
+  if (byLegacy.length === 1) return byLegacy[0];
 
   // Case-sensitive: Firestore ids are, and a case-folded compare here would
   // make two distinct ids collide.

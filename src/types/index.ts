@@ -38,6 +38,15 @@ export interface Claims {
 
 export interface ResultPeakSchool {
   name: string;
+  /**
+   * ResultPeak's STORED slug - the one it prints and links with, reserved for
+   * uniqueness in `schoolSlugs/{slug}`. Authoritative; never derive over it.
+   *
+   * Optional because a school created before ResultPeak stored one has none.
+   * Read it through `canonicalSchoolSlug()` in lib/db/resultpeak, which falls
+   * back to the name-derived form for exactly that case.
+   */
+  slug?: string;
   subjects: { id: string; name: string }[];
   gradingScale: { min: number; letter: string; remark: string }[];
   isActive: boolean;

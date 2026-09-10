@@ -46,6 +46,74 @@ the address the app **prints** when it has to write one down.
 Moving from tier 2 to tier 3 is one document and one DNS record. Nothing is
 rebuilt, and no address stops working.
 
+### The slug is ResultPeak's, and this repo reads it
+
+`/s/{slug}` only works if both products mean the same string by `{slug}`. They
+did not. ResultPeak stores a slug on `schools/{id}.slug` and reserves it in
+`schoolSlugs/{slug}`; this repo ignored both and recomputed one from the school's
+name on every read. Measured 2026-09-10, they disagreed for **three of the four
+schools in the project**:
+
+| school | stored (ResultPeak) | derived (here, before the fix) |
+|---|---|---|
+| HIGHER GROUND INTERNATIONAL GROUP OF SCHOOL | `higher-ground` | `higher-ground-international-group-of-school` |
+| Mt. Cedar British International School | `mt-cedar` | `mt-cedar-british-international-school` |
+| Dlink Academy (ActiveBrains) | *(none)* | `dlink-academy-activebrains` |
+| CAPSTONE ACADEMY | `capstone-academy` | `capstone-academy` |
+
+So every `/s/{slug}` link ResultPeak printed for two of these schools landed on
+this side's school picker — unbranded, no error anywhere, because an unknown slug
+is *designed* to fall through to the picker. **It is the same symptom as a link
+pointing at the shared deployment, from a completely unrelated cause**, which is
+why the two were reported together as one problem.
+
+`canonicalSchoolSlug()` in `src/lib/db/resultpeak.ts` is now the only answer:
+ResultPeak's stored slug, falling back to the name-derived form only when it is
+absent — which is correct for Dlink today, and is a real state rather than a gap.
+It is read in both places that need it: `getSchoolDirectory()`, which resolves an
+inbound `/s/{slug}`, and `getSchoolBrand()`, whose `slug` is what
+`printableSchoolAddress()` puts on **paper**.
+
+The name-derived form still *resolves* (`SchoolListing.legacySlug`), and is never
+printed. This repo put it on class sign-in sheets before the stored slug was read
+here, and paper does not get recalled. It is matched second, so a stored slug
+always wins, and through the same "exactly one match" guard — an alias must never
+make two schools answer to one link.
+
+### A school that has an address is sent to it
+
+`/s/{slug}` on a **platform host**, for a visitor with **no session**, forwards
+to `https://{primaryAddress}/s/{slug}` when the school has a lessons address of
+its own. The destination then resolves the school from its own hostname — which
+beats the cookie — pins the device and brands every screen.
+
+This exists because a school's real address can be registered and working while
+something still points a person at the shared deployment. That happened, and it
+was not rare: ResultPeak's "Open JDSmartLearn" links read
+`schoolBranding.lessonsUrl`, which is **absent for every school in the project**,
+so every one of them fell through to `VITE_JDSMARTLEARN_URL`. The fix over there
+is `docs/resultpeak-partner-origin-prompt.md`; this is the half that does not
+wait for it, and the only half that can recover a printed link or a bookmark
+naming `jdsmartlearn.vercel.app`.
+
+Three guards, in `src/app/s/[slug]/route.ts`:
+
+- **Never a signed-in visitor.** Cookies are host-scoped, so a cross-origin hop
+  drops their session. Cookie presence is enough and is deliberately not
+  verified — this decides whether to be helpful, not whether to grant anything.
+- **Never off a school's own host**, so the destination cannot forward again and
+  there is no loop.
+- **Never a destination from the request.** The host comes from `schoolDomains`;
+  `?next=` only picks a path, from an exact-match set.
+
+A school with no lessons address gets `""` from `primaryAddress()` and the
+unchanged behaviour, which is most schools and is not a gap.
+
+`?next=` is what lets a **staff** link name a school. ResultPeak's student card
+already carries `/s/{slug}`; its staff links go to `/tutor` with no school, which
+is why a child got a branded sign-in on the shared deployment and a teacher did
+not.
+
 ---
 
 ## A school needs TWO hostnames, one per app

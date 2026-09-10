@@ -79,6 +79,52 @@ to send.
 Nothing here changes who writes what: `schoolBranding` is ResultPeak's document
 and this repository only ever reads it.
 
+### Both fields were absent everywhere, and the links were wrong because of it
+
+Measured 2026-09-10 against the live project: **`lessonsUrl` and `resultsUrl`
+were absent for every school**, including Mt. Cedar British International School
+(`dV6zL3AEydAFJc3D3GrO`), whose two addresses are registered, active and marked
+primary in `schoolDomains`.
+
+So the precedence fell straight through to the environment variable on both
+sides. A member of staff at Mt Cedar signing in at `portal.mtcedar…` and clicking
+**Open JDSmartLearn** reached `jdsmartlearn.vercel.app` — the plain product door,
+no crest, no colours — and this repository's links back reached the shared
+ResultPeak deployment for the same reason.
+
+The table below reads as though the two ResultPeak → JDSmartLearn rows use only
+the variable **by design**. They do not; they use the same precedence, and it had
+nothing to resolve.
+
+**ResultPeak's projection code was correct and deployed the whole time. It had
+simply never run for any existing school**, because it fires on a branding save
+and every school predated it. That is the failure worth remembering from this:
+correct code that has never executed is indistinguishable, from the school's
+side, from code that was never written, and nothing on any screen said which it
+was.
+
+Re-measured later the same day, **Mt Cedar is backfilled**:
+
+```
+lessonsUrl = "https://learn.mtcedarbritishinternationalsch.com.ng"
+resultsUrl = "https://portal.mtcedarbritishinternationalsch.com.ng"
+```
+
+and this repository's front door on that host now links to
+`https://portal.mtcedar…`, bare, with `/s/{slug}` correctly dropped. The other
+three schools still read `null` and correctly so — none has a `schoolDomains`
+row, and absent is the documented normal case.
+
+The remaining ask is future-proofing, in
+`docs/resultpeak-partner-origin-prompt.md`: make the gap between "registered a
+domain" and "projected an origin" visible, so the next school cannot sit in it
+unnoticed.
+
+This repository also forwards a signed-out `/s/{slug}` arrival on a platform host
+to the school's own address — see `docs/school-addresses.md`. That covers printed
+links and bookmarks naming the shared deployment, which no change on ResultPeak's
+side can reach.
+
 ## Deployment order: independent, in both directions
 
 Each side reads only its own variable and renders only its own link. Neither

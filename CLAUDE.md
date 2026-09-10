@@ -28,7 +28,7 @@ JDSmartLearn runs **inside ResultPeak's existing Firebase project**. Same `proje
 
 ### Collections ResultPeak owns — READ ONLY, NEVER WRITE
 
-`schools`, `classes`, `students`, `studentAccess`, `studentUsernames`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`
+`schools`, `classes`, `students`, `studentAccess`, `studentUsernames`, `schoolSlugs`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`
 
 Never create, update, or delete a document in any of them. Never build roster CRUD, CSV import, or a second student registry — that data already exists and ResultPeak owns it.
 

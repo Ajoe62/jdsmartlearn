@@ -238,6 +238,13 @@ export const RESULTPEAK_OWNED = new Set<string>([
    * mapping. That is the same argument as `attendance` above, and it is the
    * reason both are named here rather than left to good intentions.
    *
+   * `schoolSlugs/{slug}` is ResultPeak's uniqueness reservation for a school's
+   * slug - the same shape, and the same argument, as `studentUsernames` above.
+   * This repo READS the slug off `schools/{id}.slug` (see canonicalSchoolSlug)
+   * and never touches the reservation. A write from here would land at a
+   * DETERMINISTIC id, the slug itself, on top of the record that proves an
+   * address belongs to one school.
+   *
    * `schoolBranding` is a DERIVED PROJECTION of `schools/{id}.branding`, written
    * by exactly one writer in ResultPeak immediately after it saves the school
    * (`api/_lib/branding/publicBranding.js`, "data flows one way and NEVER
@@ -252,7 +259,7 @@ export const RESULTPEAK_OWNED = new Set<string>([
    * reaches no object store, so a school purge has no branding files to sweep.
    * See lib/branding/school.ts.
    */
-  "schoolDomains", "schoolBranding",
+  "schoolDomains", "schoolBranding", "schoolSlugs",
 ]);
 
 /**

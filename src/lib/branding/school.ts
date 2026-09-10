@@ -2,7 +2,7 @@ import "server-only";
 import { revalidateTag, unstable_cache } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
 import { RP } from "@/lib/db/collections";
-import { schoolSlug } from "@/lib/db/resultpeak";
+import { canonicalSchoolSlug } from "@/lib/db/resultpeak";
 import { assertBrandColour, defaultBrandColour, type BrandColour } from "./colour";
 import {
   crestUrlFor,
@@ -118,7 +118,15 @@ export interface SchoolBrand {
   motto: string | null;
   /** Always resolved - falls back to brand indigo. `fg` is computed, never chosen. */
   colour: BrandColour;
-  /** The /s/{slug} link a school prints. Derived until ResultPeak stores one. */
+  /**
+   * The /s/{slug} link a school prints. RESULTPEAK'S STORED SLUG when it has
+   * one, derived from the name only when it has not.
+   *
+   * THIS IS THE ONE THAT REACHES PAPER - printableSchoolAddress() puts it on
+   * every class sign-in sheet - and the one that builds the outbound link to
+   * ResultPeak. Deriving it over a stored value printed an address that landed
+   * on this side's own school picker. See canonicalSchoolSlug().
+   */
   slug: string;
   /**
    * The school's own ResultPeak origin, or null - which is the common case and
@@ -228,7 +236,8 @@ export function getSchoolBrand(schoolId: string): Promise<SchoolBrand | null> {
         crestUrl: hasCrest ? crestUrlFor(schoolId, version) : null,
         motto: branding.motto?.trim() || null,
         colour,
-        slug: schoolSlug(name),
+        // ResultPeak's stored slug. Free: `schools/{id}` is already read above.
+        slug: canonicalSchoolSlug(schoolSnap.get("slug"), name),
         resultsUrl: isSafePartnerOrigin(ownResults) ? ownResults : null,
       };
     },
