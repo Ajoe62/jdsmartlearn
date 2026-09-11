@@ -1,17 +1,24 @@
-import { extname } from "node:path";
 import { NextResponse } from "next/server";
 import {
   getTutorSession,
   assertClassAccess,
   assertSubjectAccess,
 } from "@/lib/auth/tutor";
-import { extractText, ExtractionError } from "@/lib/extract/text";
-import { createScheme, setSchemeFile } from "@/lib/db/schemes";
+import { MAX_STORED_CHARS } from "@/lib/extract/text";
+import { createScheme, newSchemeId } from "@/lib/db/schemes";
 import { writeAuditLog } from "@/lib/db/lessons";
 import { getClassesByIds, getSubjects, listClassesForSchool } from "@/lib/db/resultpeak";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
-import { putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
 import { schemeFileKey } from "@/lib/storage/keys";
+import {
+  UploadError,
+  claimUpload,
+  discardClaimed,
+  fileFields,
+  readClaimedText,
+  tutorActor,
+  type ClaimedFile,
+} from "@/lib/storage/uploads";
 import type { SchemeWeek } from "@/types/schemes";
 
 export const maxDuration = 60;
@@ -26,13 +33,33 @@ export const maxDuration = 60;
  *
  * Authorization is server-side and unconditional: the (class, subject) pair must
  * be one this tutor teaches, read fresh from ResultPeak on this request.
+ *
+ * THE FILE ARRIVES AS A STAGING KEY, not bytes - the browser has already put it
+ * in R2, because a Vercel function refuses bodies over 4.5 MB. It is claimed
+ * BEFORE the scheme is created, so a failed store is an error the tutor sees,
+ * never a scheme quietly saved without its document (which is what used to
+ * happen: the store failure was swallowed and the tutor told it had worked).
+ *
+ * TEXT IS A BONUS HERE, never a condition. A scanned scheme, an old .doc or a
+ * spreadsheet is kept as the original that students open; text is shown beside
+ * it when it can be read.
  */
 
 const MAX_TITLE = 120;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
 /** A Nigerian term runs 12 to 14 weeks; 20 is slack, not a target. */
 const MAX_WEEKS = 20;
 const MAX_WEEK_TOPIC = 200;
+
+interface Body {
+  classId?: string;
+  subjectId?: string;
+  title?: string;
+  text?: string;
+  weeks?: unknown;
+  publish?: boolean;
+  uploadKey?: string;
+  fileName?: string;
+}
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -77,13 +104,16 @@ export async function POST(req: Request) {
   const session = await getTutorSession();
   if (!session) return bad("Sign in to continue.", 401);
 
-  const form = await req.formData();
-  const classId = String(form.get("classId") ?? "").trim();
-  const subjectId = String(form.get("subjectId") ?? "").trim();
-  const title = String(form.get("title") ?? "").trim();
-  const pasted = String(form.get("text") ?? "").trim();
-  const file = form.get("file");
-  const publish = String(form.get("publish") ?? "") === "true";
+  // A page from before direct uploads posts multipart, which is not JSON.
+  const body = (await req.json().catch(() => null)) as Body | null;
+  if (!body) return bad("This page is out of date. Reload it, then try again.");
+
+  const classId = String(body.classId ?? "").trim();
+  const subjectId = String(body.subjectId ?? "").trim();
+  const title = String(body.title ?? "").trim();
+  const pasted = String(body.text ?? "").trim();
+  const publish = body.publish === true;
+  const hasUpload = typeof body.uploadKey === "string" && body.uploadKey.length > 0;
 
   if (!title) return bad("Give the scheme of work a title.");
   if (title.length > MAX_TITLE) return bad(`Keep the title under ${MAX_TITLE} characters.`);
@@ -97,8 +127,23 @@ export async function POST(req: Request) {
     return bad("You don't teach that subject to that class.", 403);
   }
 
-  const weeks = parseWeeks(form.get("weeks"));
+  const weeks = parseWeeks(body.weeks);
   if (!Array.isArray(weeks)) return bad(weeks.error);
+
+  if (pasted.length > MAX_STORED_CHARS) {
+    return bad("That text is too long to paste. Upload it as a file instead.");
+  }
+
+  /**
+   * A scheme needs SOMETHING - a document, typed text, or a week list.
+   *
+   * No minimum length, unlike a lesson. A lesson under 200 characters cannot be
+   * summarised usefully; a scheme is not summarised at all, and "Weeks 1-3:
+   * revision" is a legitimate scheme of work for a short term.
+   */
+  if (!hasUpload && !pasted && weeks.length === 0) {
+    return bad("Add the scheme of work: upload a document, paste it, or fill in the weeks.");
+  }
 
   // Validate the subject against the school's own list, and pick up the display
   // name to denormalize. An id that is not in `subjects[]` would join to nothing.
@@ -112,28 +157,20 @@ export async function POST(req: Request) {
   const klass = classes.find((c) => c.id === classId);
   if (!klass) return bad("That class is not in your school.");
 
-  let extractedText = pasted;
-  try {
-    if (file instanceof File && file.size > 0) {
-      if (file.size > MAX_FILE_BYTES) return bad("That file is over 10 MB.");
-      extractedText = await extractText(file);
+  const schemeId = newSchemeId();
+  let claimed: ClaimedFile | null = null;
+  if (hasUpload) {
+    try {
+      claimed = await claimUpload(tutorActor(session), "scheme", body.uploadKey, body.fileName, (ext) =>
+        schemeFileKey(session.schoolId, schemeId, ext)
+      );
+    } catch (err) {
+      if (err instanceof UploadError) return bad(err.message, err.status);
+      throw err;
     }
-  } catch (err) {
-    const message =
-      err instanceof ExtractionError ? err.message : "We couldn't read that file.";
-    return bad(message);
   }
 
-  /**
-   * A scheme needs SOMETHING readable - a document, typed text, or a week list.
-   *
-   * No minimum length, unlike a lesson. A lesson under 200 characters cannot be
-   * summarised usefully; a scheme is not summarised at all, and "Weeks 1-3:
-   * revision" is a legitimate scheme of work for a short term.
-   */
-  if (!extractedText && weeks.length === 0) {
-    return bad("Add the scheme of work: upload a document, paste it, or fill in the weeks.");
-  }
+  const extractedText = pasted || (claimed ? await readClaimedText(claimed) : "");
 
   /**
    * Term and session, stamped once and copied byte for byte - the same rule as a
@@ -142,41 +179,28 @@ export async function POST(req: Request) {
    */
   const settings = await getCurrentTermSession(session.schoolId);
 
-  const schemeId = await createScheme({
-    schoolId: session.schoolId,
-    classId,
-    className: klass.name,
-    subjectId,
-    subjectName: subject.name,
-    tutorId: session.uid,
-    term: settings?.term ?? null,
-    session: settings?.session ?? null,
-    title,
-    extractedText,
-    weeks,
-    publishedAt: publish ? Date.now() : null,
-  });
-
-  // Keep the original document. Text is the student-facing default on a slow
-  // link - if storage is not configured or the upload fails, the scheme still
-  // works text-only, exactly as a lesson does.
-  if (file instanceof File && file.size > 0 && storageConfigured()) {
-    const ext = extname(file.name.toLowerCase());
-    const storable = STORABLE_TYPES[ext];
-    if (storable) {
-      try {
-        const key = schemeFileKey(session.schoolId, schemeId, ext);
-        await putFile(key, Buffer.from(await file.arrayBuffer()), storable.mime);
-        await setSchemeFile(schemeId, {
-          fileKey: key,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: storable.mime,
-        });
-      } catch {
-        // Text-only is a working scheme of work. Never fail the upload on it.
-      }
-    }
+  try {
+    await createScheme(
+      {
+        schoolId: session.schoolId,
+        classId,
+        className: klass.name,
+        subjectId,
+        subjectName: subject.name,
+        tutorId: session.uid,
+        term: settings?.term ?? null,
+        session: settings?.session ?? null,
+        title,
+        extractedText,
+        weeks,
+        publishedAt: publish ? Date.now() : null,
+        ...(claimed ? fileFields(claimed) : {}),
+      },
+      schemeId
+    );
+  } catch (err) {
+    await discardClaimed(claimed);
+    throw err;
   }
 
   await writeAuditLog({
@@ -186,5 +210,5 @@ export async function POST(req: Request) {
     entityId: schemeId,
   }).catch(() => {});
 
-  return NextResponse.json({ id: schemeId }, { status: 201 });
+  return NextResponse.json({ id: schemeId, textFound: extractedText.length > 0 }, { status: 201 });
 }

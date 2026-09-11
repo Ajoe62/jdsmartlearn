@@ -10,6 +10,7 @@ import {
 import { getLesson, countGenerationsToday, writeAuditLog } from "@/lib/db/lessons";
 import { getSubjects } from "@/lib/db/resultpeak";
 import { generateStudyMaterials } from "@/lib/ai/provider";
+import { MIN_USABLE_CHARS } from "@/lib/extract/text";
 import { GenerationError } from "@/lib/ai/errors";
 import type { ClassLevel, Topic } from "@/types";
 
@@ -32,6 +33,22 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json(
       { error: "You don't teach that subject to that class." },
       { status: 403 }
+    );
+  }
+
+  /**
+   * No text, no study guide. A lesson whose original is a scan or a slide deck
+   * is created with empty text on purpose (owner's decision, 2026-09-11), and
+   * sending the model an empty lesson would spend the daily cap on a guide
+   * invented from the topic title alone. Checked BEFORE the cap, so a refusal
+   * here costs the tutor nothing.
+   */
+  if ((lesson.extractedText ?? "").trim().length < MIN_USABLE_CHARS) {
+    return NextResponse.json(
+      {
+        error: `This lesson needs at least ${MIN_USABLE_CHARS} characters of text before we can make a study guide. Add the lesson text under Edit lesson, then try again.`,
+      },
+      { status: 400 }
     );
   }
 

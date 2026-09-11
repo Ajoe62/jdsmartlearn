@@ -9,13 +9,15 @@ import {
   submissionId,
   toStudentSubmissionPayload,
 } from "@/lib/db/submissions";
-import { putFile, storageConfigured, STORABLE_TYPES } from "@/lib/storage/provider";
+import { storageConfigured } from "@/lib/storage/provider";
 import { submissionAttachmentKey } from "@/lib/storage/keys";
 import {
   MAX_SUBMISSION_FILES,
+  cleanFileName,
   extensionOf,
   rejectAttachment,
 } from "@/lib/storage/file-types";
+import { UploadError, claimUpload, studentActor } from "@/lib/storage/uploads";
 import { writeAuditLog } from "@/lib/db/lessons";
 import { gradingEnabled } from "@/lib/db/grading-sweep";
 import type { SubmissionAttachment } from "@/types/student-dashboard";
@@ -32,6 +34,10 @@ export const maxDuration = 60;
  * JDSmartLearn has its own Vercel function budget and is not subject to
  * ResultPeak's Hobby-plan 12-function cap.
  *
+ * ATTACHMENTS ARRIVE AS STAGING KEYS, NOT BYTES. The phone has already put each
+ * file in R2 (lib/upload-client.ts), because a Vercel function refuses any body
+ * over 4.5 MB and a single phone photo can exceed that. This route claims them.
+ *
  * Every check here is server-side. The page hiding the form for a closed
  * assignment is a courtesy; this is the control.
  */
@@ -42,38 +48,56 @@ function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+/** One file the phone already put in storage, named by its staging key. */
+interface StagedAttachment {
+  uploadKey?: unknown;
+  name?: unknown;
+}
+
 export async function POST(req: Request) {
   const session = await getStudentSession();
   if (!session) return bad("Sign in to continue.", 401);
 
-  // Submitting carries files, so it arrives as multipart. Status is JSON.
+  /**
+   * JSON from this build and from the offline queue. Multipart is still read,
+   * because a page loaded before direct uploads posts that way: its typed
+   * answer is accepted, and a file in it is refused with a way forward rather
+   * than dying at the platform's size limit with an error a child cannot read.
+   */
   const contentType = req.headers.get("content-type") ?? "";
   const isMultipart = contentType.includes("multipart/form-data");
 
   let action = "";
   let assignmentId = "";
   let content = "";
-  let files: File[] = [];
+  let staged: StagedAttachment[] = [];
   let batchId: string | null = null;
 
   if (isMultipart) {
-    const form = await req.formData();
+    const form = await req.formData().catch(() => null);
+    if (!form) return bad("We couldn't read that. Reload the page and send again.");
+    if (form.getAll("files").some((f) => f instanceof File && f.size > 0)) {
+      return bad(
+        "This page is out of date. Reload it, then send your work again. Your typing is saved on this phone."
+      );
+    }
     action = String(form.get("action") ?? "");
     assignmentId = String(form.get("assignmentId") ?? "");
     content = String(form.get("content") ?? "").trim();
     batchId = form.get("batchId") ? String(form.get("batchId")) : null;
-    files = form.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
   } else {
     const body = (await req.json().catch(() => ({}))) as {
       action?: string;
       assignmentId?: string;
       content?: string;
       batchId?: string;
+      attachments?: StagedAttachment[];
     };
     action = body.action ?? "";
     assignmentId = body.assignmentId ?? "";
     content = (body.content ?? "").trim();
     batchId = body.batchId ?? null;
+    staged = Array.isArray(body.attachments) ? body.attachments : [];
   }
 
   if (!assignmentId) return bad("We couldn't tell which assignment this is.");
@@ -117,52 +141,58 @@ export async function POST(req: Request) {
   if (content.length > MAX_CONTENT) {
     return bad("That answer is too long. Shorten it and send again.");
   }
-  if (!content && files.length === 0) {
+  if (!content && staged.length === 0) {
     return bad("Write an answer or attach a file before sending.");
   }
-  if (files.length > MAX_SUBMISSION_FILES) {
+  if (staged.length > MAX_SUBMISSION_FILES) {
     return bad(`Attach at most ${MAX_SUBMISSION_FILES} files.`);
   }
 
-  // ----- Attachments. Uploaded before the document is written, so a failed
-  // upload cannot leave a submission pointing at a file that does not exist.
+  // ----- Attachments. Claimed before the document is written, so a failed
+  // claim cannot leave a submission pointing at a file that does not exist.
   const attachments: SubmissionAttachment[] = [];
-  if (files.length > 0) {
+  if (staged.length > 0) {
     if (!storageConfigured()) {
       return bad("Attachments are not available. Type your answer instead.");
     }
-    /**
-     * THE CONTROL, not the `accept` attribute on the form.
-     *
-     * `rejectAttachment` is the same function the tutor's form and the student's
-     * form are built from, so all three agree about what a null on the document
-     * meant and about which extensions exist at all. A request that never went
-     * near the file picker, or an offline submission replayed days later, is
-     * checked here exactly as a fresh one is.
-     */
-    for (const file of files) {
-      const refusal = rejectAttachment(file, assignment.allowedFileTypes);
+    const actor = studentActor(session);
+    for (const item of staged) {
+      /**
+       * THE CONTROL, not the `accept` attribute on the form.
+       *
+       * Two gates. `rejectAttachment` applies this assignment's own list - the
+       * same function the tutor's form and the student's form are built from,
+       * so all three agree about what a null on the document meant. Then
+       * `claimUpload` checks the product-wide list, the owner, and the size of
+       * the object that actually arrived, whatever the phone said about it.
+       */
+      const ext = extensionOf(typeof item?.uploadKey === "string" ? item.uploadKey : "");
+      const refusal = rejectAttachment(
+        { name: cleanFileName(item?.name, ext), size: 0 },
+        assignment.allowedFileTypes
+      );
       if (refusal) return bad(refusal);
 
-      const ext = extensionOf(file.name);
-      const known = STORABLE_TYPES[ext];
-      // rejectAttachment already required a submittable extension, so this is
-      // unreachable; it stays because `known.mime` below must not be undefined
-      // if the two lists ever drift.
-      if (!known) return bad(`${file.name} is not a file type your teacher accepts.`);
-      const key = submissionAttachmentKey(
-        session.schoolId,
-        assignmentId,
-        session.studentId,
-        attachments.length,
-        ext
-      );
       try {
-        await putFile(key, Buffer.from(await file.arrayBuffer()), known.mime);
-      } catch {
-        return bad("We couldn't upload that file. Check your connection and try again.", 502);
+        const claimed = await claimUpload(actor, "submission", item?.uploadKey, item?.name, (e) =>
+          submissionAttachmentKey(
+            session.schoolId,
+            assignmentId,
+            session.studentId,
+            attachments.length,
+            e
+          )
+        );
+        attachments.push({
+          name: claimed.name,
+          key: claimed.key,
+          type: claimed.mime,
+          size: claimed.size,
+        });
+      } catch (err) {
+        if (err instanceof UploadError) return bad(err.message, err.status);
+        return bad("We couldn't save that file. Check your connection and try again.", 502);
       }
-      attachments.push({ name: file.name, key, type: known.mime, size: file.size });
     }
   }
 

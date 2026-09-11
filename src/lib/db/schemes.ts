@@ -3,6 +3,7 @@ import { unstable_cache, revalidateTag } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
 import { JD, LIST_LIMIT, QUERY_LIMIT } from "./collections";
 import { assertWritable } from "./write-guard";
+import { inlineable } from "@/lib/storage/file-types";
 import type { Scheme, StudentScheme, StudentSchemeSummary } from "@/types/schemes";
 
 /**
@@ -21,21 +22,26 @@ export const schemesTag = (classId: string) => `schemes:${classId}`;
 
 const REVALIDATE_SECONDS = 300;
 
-function inlineable(fileType: string | undefined): boolean {
-  const t = fileType ?? "";
-  return t.startsWith("application/pdf") || t.startsWith("text/") || t.startsWith("image/");
+/** A fresh scheme id, without writing anything - see newLessonId(). */
+export function newSchemeId(): string {
+  return adminDb.collection(JD.schemes).doc().id;
 }
 
 export async function createScheme(
-  data: Omit<Scheme, "id" | "createdAt" | "updatedAt">
+  data: Omit<Scheme, "id" | "createdAt" | "updatedAt">,
+  id?: string
 ): Promise<string> {
   assertWritable(JD.schemes);
   const now = Date.now();
-  const ref = await adminDb
-    .collection(JD.schemes)
-    .add({ ...data, createdAt: now, updatedAt: now });
+  const doc = { ...data, createdAt: now, updatedAt: now };
+  let schemeId = id;
+  if (schemeId) {
+    await adminDb.collection(JD.schemes).doc(schemeId).create(doc);
+  } else {
+    schemeId = (await adminDb.collection(JD.schemes).add(doc)).id;
+  }
   if (data.publishedAt) revalidateTag(schemesTag(data.classId));
-  return ref.id;
+  return schemeId;
 }
 
 export async function getScheme(id: string): Promise<Scheme | null> {

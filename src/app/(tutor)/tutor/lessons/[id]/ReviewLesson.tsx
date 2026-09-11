@@ -15,20 +15,31 @@ type Content = { summary: string; questions: Question[]; markingGuide: Guide[] }
 export default function ReviewLesson({
   lessonId,
   status,
+  canGenerate,
   content,
 }: {
   lessonId: string;
   status: LessonStatus;
+  /** False when the lesson has too little text - a scan or slides with no text layer. */
+  canGenerate: boolean;
   content: Content | null;
 }) {
   if (!content) {
-    return <GeneratePanel lessonId={lessonId} status={status} />;
+    return <GeneratePanel lessonId={lessonId} status={status} canGenerate={canGenerate} />;
   }
   return <ReviewPanel lessonId={lessonId} status={status} content={content} />;
 }
 
 /** Shown before study materials exist (draft), or if a generation was interrupted. */
-function GeneratePanel({ lessonId, status }: { lessonId: string; status: LessonStatus }) {
+function GeneratePanel({
+  lessonId,
+  status,
+  canGenerate,
+}: {
+  lessonId: string;
+  status: LessonStatus;
+  canGenerate: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,9 +99,16 @@ function GeneratePanel({ lessonId, status }: { lessonId: string; status: LessonS
 
       {error && <Callout tone="danger" title="We couldn't create study materials">{error}</Callout>}
 
-      <Button onClick={generate} disabled={busy} size="lg" full>
+      <Button onClick={generate} disabled={busy || !canGenerate} size="lg" full>
         {busy ? "Creating study materials… this can take a moment" : "Generate study materials"}
       </Button>
+
+      {/* Say why, rather than leaving a dead button unexplained. */}
+      {!canGenerate && (
+        <p className="text-center text-sm text-muted">
+          To generate: add the lesson text under Edit lesson.
+        </p>
+      )}
     </div>
   );
 }

@@ -6,14 +6,16 @@ import {
 } from "@/lib/auth/tutor";
 import { getStudentSession } from "@/lib/auth/student";
 import { getLesson } from "@/lib/db/lessons";
-import { getFile } from "@/lib/storage/provider";
+import { serveStoredFile } from "@/lib/storage/serve";
 
 /**
  * Serve a lesson's original file. NEVER public: every request re-checks
  * authorization server-side (security rules #2 and #5).
  * - Tutors/admins: same school + class access.
  * - Students: same school + own class + material must be published.
- * PDFs and text render inline; docx always downloads.
+ *
+ * How the bytes travel - streamed, or a short-lived redirect for files over
+ * 4 MB - is serve.ts's business, and happens only after the checks below pass.
  */
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -70,23 +72,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     }
   }
 
-  const stored = await getFile(lesson.fileKey);
-  if (!stored) {
-    return NextResponse.json({ error: "The file is no longer available." }, { status: 404 });
-  }
-
-  const mime = lesson.fileType ?? stored.contentType ?? "application/octet-stream";
-  const inline = mime.startsWith("application/pdf") || mime.startsWith("text/");
-  // ASCII-safe filename for the header.
-  const safeName = (lesson.fileName ?? "lesson-file").replace(/[^\w.\- ]+/g, "_");
-
-  return new NextResponse(new Uint8Array(stored.body), {
-    headers: {
-      "Content-Type": mime,
-      "Content-Length": String(stored.body.length),
-      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${safeName}"`,
-      // Private: browsers may cache locally, shared caches must not.
-      "Cache-Control": "private, max-age=3600",
-    },
+  return serveStoredFile({
+    key: lesson.fileKey,
+    name: lesson.fileName,
+    fallbackName: "lesson-file",
+    size: lesson.fileSize,
+    // Private: browsers may cache locally, shared caches must not.
+    cacheControl: "private, max-age=3600",
   });
 }

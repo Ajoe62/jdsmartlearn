@@ -5,7 +5,14 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import Callout from "@/components/ui/Callout";
 import Field, { CONTROL } from "@/components/ui/Field";
+import FileUploadField, { type UploadedFile } from "@/components/tutor/FileUploadField";
 import { subjectsForClass } from "@/lib/auth/subject-access";
+import {
+  MAX_TUTOR_FILE_BYTES,
+  TUTOR_UPLOAD_LABEL,
+  formatLimit,
+} from "@/lib/storage/file-types";
+import { readApiError } from "@/lib/upload-client";
 
 /**
  * Upload a scheme of work.
@@ -30,18 +37,23 @@ export default function SchemeUploadForm({
   classes,
   subjects,
   teachable,
+  filesAvailable,
 }: {
   classes: { id: string; name: string }[];
   subjects: { id: string; name: string }[];
   /** subjectId -> classIds. `{}` means no restriction - see subject-access. */
   teachable: Record<string, string[]>;
+  /** False when R2 is not configured: paste or type the weeks instead. */
+  filesAvailable: boolean;
 }) {
   const router = useRouter();
 
   const [classId, setClassId] = useState(classes[0]?.id ?? "");
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  /** The document, once it has reached storage. */
+  const [upload, setUpload] = useState<UploadedFile | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [weeks, setWeeks] = useState<WeekRow[]>([]);
   const [publish, setPublish] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,25 +76,25 @@ export default function SchemeUploadForm({
     setError(null);
     setSaving(true);
     try {
-      const form = new FormData();
-      form.set("classId", classId);
-      form.set("subjectId", effectiveSubject);
-      form.set("title", title);
-      form.set("text", text);
-      form.set("publish", String(publish));
-      form.set("weeks", JSON.stringify(weeks.filter((w) => w.topic.trim())));
-      if (file) form.set("file", file);
-
       const res = await fetch("/api/schemes", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: form,
+        body: JSON.stringify({
+          classId,
+          subjectId: effectiveSubject,
+          title,
+          text,
+          publish,
+          weeks: weeks.filter((w) => w.topic.trim()),
+          // The document itself is already in storage; this names it.
+          ...(upload ? { uploadKey: upload.uploadKey, fileName: upload.name } : {}),
+        }),
       });
 
       if (!res.ok) {
         // The server's own message - it names the field to fix.
-        const payload = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(payload.error ?? "We couldn't save that. Try again.");
+        setError(await readApiError(res, "We couldn't save that. Try again."));
         return;
       }
 
@@ -144,19 +156,23 @@ export default function SchemeUploadForm({
         />
       </Field>
 
-      <Field
-        label="Upload the document"
-        hint="PDF, Word or plain text, up to 10 MB. Students read the text on a slow connection and can open the original."
-        htmlFor="scheme-file"
-      >
-        <input
+      {filesAvailable ? (
+        <FileUploadField
           id="scheme-file"
-          type="file"
-          className={CONTROL}
-          accept=".pdf,.docx,.txt"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          label="Upload the document"
+          hint={`${TUTOR_UPLOAD_LABEL}, up to ${formatLimit(MAX_TUTOR_FILE_BYTES)}. Students can open the original, and read its text on a slow connection when it is a PDF or Word file.`}
+          purpose="scheme"
+          value={upload}
+          onChange={setUpload}
+          onBusyChange={setUploading}
+          disabled={saving}
         />
-      </Field>
+      ) : (
+        <p className="text-sm text-muted">
+          File uploads aren&rsquo;t set up for your school yet. Paste the scheme of work
+          or fill in the weeks below.
+        </p>
+      )}
 
       <Field
         label="Or paste it"
@@ -192,9 +208,21 @@ export default function SchemeUploadForm({
 
       {error && <Callout tone="danger">{error}</Callout>}
 
-      <Button type="submit" full size="lg" disabled={saving || !classId || !effectiveSubject}>
-        {saving ? "Saving…" : publish ? "Save and publish" : "Save as draft"}
-      </Button>
+      <div>
+        <Button
+          type="submit"
+          full
+          size="lg"
+          disabled={saving || uploading || !classId || !effectiveSubject}
+        >
+          {saving ? "Saving…" : publish ? "Save and publish" : "Save as draft"}
+        </Button>
+        {uploading && (
+          <p className="mt-2 text-center text-sm text-muted">
+            To save: wait for the document to finish uploading.
+          </p>
+        )}
+      </div>
     </form>
   );
 }

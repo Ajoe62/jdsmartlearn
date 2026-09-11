@@ -6,7 +6,7 @@ import {
 } from "@/lib/auth/tutor";
 import { getStudentSession } from "@/lib/auth/student";
 import { getScheme } from "@/lib/db/schemes";
-import { getFile } from "@/lib/storage/provider";
+import { serveStoredFile } from "@/lib/storage/serve";
 
 /**
  * Serve a scheme of work's original file. NEVER public: every request re-checks
@@ -61,23 +61,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     }
   }
 
-  const stored = await getFile(scheme.fileKey);
-  if (!stored) {
-    return NextResponse.json({ error: "The file is no longer available." }, { status: 404 });
-  }
-
-  const mime = scheme.fileType ?? stored.contentType ?? "application/octet-stream";
-  const inline =
-    mime.startsWith("application/pdf") || mime.startsWith("text/") || mime.startsWith("image/");
-  const safeName = (scheme.fileName ?? "scheme-of-work").replace(/[^\w.\- ]+/g, "_");
-
-  return new NextResponse(new Uint8Array(stored.body), {
-    headers: {
-      "Content-Type": mime,
-      "Content-Length": String(stored.body.length),
-      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${safeName}"`,
-      // Private: browsers may cache locally, shared caches must not.
-      "Cache-Control": "private, max-age=3600",
-    },
+  return serveStoredFile({
+    key: scheme.fileKey,
+    name: scheme.fileName,
+    fallbackName: "scheme-of-work",
+    size: scheme.fileSize,
+    // Private: browsers may cache locally, shared caches must not.
+    cacheControl: "private, max-age=3600",
   });
 }

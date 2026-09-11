@@ -1,10 +1,17 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import FileUploadField, { type UploadedFile } from "@/components/tutor/FileUploadField";
 import { classesForSubject, subjectsForClass } from "@/lib/auth/subject-access";
 import { CONTROL } from "@/components/ui/Field";
-import { SUBMITTABLE_TYPES } from "@/lib/storage/file-types";
+import {
+  MAX_TUTOR_FILE_BYTES,
+  SUBMITTABLE_TYPES,
+  TUTOR_UPLOAD_LABEL,
+  formatLimit,
+} from "@/lib/storage/file-types";
+import { readApiError } from "@/lib/upload-client";
 import { RESULTPEAK_TERMS } from "@/lib/academic-calendar";
 import { ASSIGNMENT_TYPES, ASSIGNMENT_TYPE_LABELS } from "@/types/student-dashboard";
 import type { AssignmentType } from "@/types/student-dashboard";
@@ -15,6 +22,12 @@ type LessonOpt = { id: string; title: string; classId: string; subjectId: string
 
 const MIN_GUIDE = 20;
 
+/** "2026-09-11T14:30" in the phone's own zone - the format datetime-local takes. */
+function localDateTime(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /**
  * Deliberately online-only, unlike the new lesson form.
  *
@@ -22,6 +35,11 @@ const MIN_GUIDE = 20;
  * offline on Monday that uploads on Thursday may already have passed. Setting
  * work is a scheduled act; writing a lesson is not. Tutors keep full offline
  * access to marking, which is the part that happens at home in the evening.
+ *
+ * SAVE ALWAYS ANSWERS. It used to stay disabled until every field was right,
+ * with nothing saying which one was not - most often the marking guide, which
+ * needs 20 characters. Tutors reported it as a Save button that did nothing.
+ * Now it saves, or it says exactly what is missing.
  */
 export default function NewAssignmentForm({
   classes,
@@ -59,8 +77,16 @@ export default function NewAssignmentForm({
   const [linkedLessonId, setLinkedLessonId] = useState("");
   const [fileTypes, setFileTypes] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
+  const [sheet, setSheet] = useState<UploadedFile | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set after mount: the server's clock and zone are not the phone's.
+  const [minDue, setMinDue] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    setMinDue(localDateTime(new Date()));
+  }, []);
 
   const lessonOptions = useMemo(
     () => lessons.filter((l) => l.classId === classId && l.subjectId === subjectId),
@@ -86,23 +112,42 @@ export default function NewAssignmentForm({
     );
   }
 
-  const guideShort = markingGuide.trim().length < MIN_GUIDE;
-  const ready =
-    Boolean(classId && subjectId && title.trim() && due) && !guideShort && !busy;
+  const guideLength = markingGuide.trim().length;
+
+  // Everything Save needs, in the words a teacher would use.
+  const missing: string[] = [];
+  if (!title.trim()) missing.push("add a title");
+  if (!classId) missing.push("choose a class");
+  if (!subjectId) missing.push("choose a subject");
+  if (!due) missing.push("choose a due date");
+  if (guideLength < MIN_GUIDE) {
+    missing.push(
+      `write what a correct answer should include (at least ${MIN_GUIDE} characters, ${guideLength} so far)`
+    );
+  }
+  if (uploading) missing.push("wait for the question sheet to finish uploading");
 
   async function save() {
     setError(null);
-    setBusy(true);
+
+    if (missing.length > 0) {
+      setError(`Before you save: ${missing.join(", ")}.`);
+      return;
+    }
 
     // Datetime-local is a wall-clock string with no zone. new Date() reads it in
     // the phone's zone, which is the zone the tutor typed it in.
     const dueDate = new Date(due).getTime();
     if (!Number.isFinite(dueDate)) {
       setError("Choose a due date and time.");
-      setBusy(false);
+      return;
+    }
+    if (dueDate <= Date.now()) {
+      setError("The due date has already passed. Pick a later one.");
       return;
     }
 
+    setBusy(true);
     try {
       const res = await fetch("/api/tutor/assignments", {
         method: "POST",
@@ -121,20 +166,22 @@ export default function NewAssignmentForm({
           linkedLessonId: linkedLessonId || null,
           allowedFileTypes: filesAvailable ? fileTypes : [],
           isActive,
+          // The sheet itself is already in storage; this names it.
+          ...(sheet ? { uploadKey: sheet.uploadKey, fileName: sheet.name } : {}),
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as {
-        assignmentId?: string;
-        error?: string;
-      };
-      if (!res.ok) throw new Error(data.error ?? "We couldn't save this assignment.");
+      if (!res.ok) throw new Error(await readApiError(res, "We couldn't save this assignment."));
       router.push("/tutor/assignments");
       router.refresh();
     } catch (err) {
       setError(
-        err instanceof Error && navigator.onLine
-          ? err.message
-          : "You're offline. Connect to the internet to set an assignment."
+        !navigator.onLine
+          ? "You're offline. Connect to the internet to set an assignment."
+          : err instanceof TypeError
+            ? "We couldn't reach the server. Check your connection and try again."
+            : err instanceof Error
+              ? err.message
+              : "We couldn't save this assignment."
       );
       setBusy(false);
     }
@@ -211,6 +258,19 @@ export default function NewAssignmentForm({
         />
       </label>
 
+      {filesAvailable && (
+        <FileUploadField
+          id="assignment-sheet"
+          label="Question sheet (optional)"
+          hint={`A file students open or download: ${TUTOR_UPLOAD_LABEL}, up to ${formatLimit(MAX_TUTOR_FILE_BYTES)}. Your marking guide is never part of it.`}
+          purpose="assignment"
+          value={sheet}
+          onChange={setSheet}
+          onBusyChange={setUploading}
+          disabled={busy}
+        />
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         <label className="block">
           <span className="text-sm font-medium">Type</span>
@@ -264,6 +324,7 @@ export default function NewAssignmentForm({
           <input
             type="datetime-local"
             value={due}
+            min={minDue}
             onChange={(e) => setDue(e.target.value)}
             className={CONTROL}
           />
@@ -286,7 +347,7 @@ export default function NewAssignmentForm({
       <label className="block">
         <span className="text-sm font-medium">What should a correct answer include?</span>
         <span className="mt-1 block text-sm text-muted">
-          The AI uses this to grade student work. Students never see it.
+          Required. The AI uses this to grade student work. Students never see it.
         </span>
         <textarea
           value={markingGuide}
@@ -295,11 +356,11 @@ export default function NewAssignmentForm({
           placeholder="Name the two stages. Say where each happens in the leaf. Give one word equation."
           className={CONTROL}
         />
-        {guideShort && markingGuide.length > 0 && (
-          <span className="mt-1 block text-sm text-muted">
-            A little more detail marks far better than a single line.
-          </span>
-        )}
+        <span className="mt-1 block text-sm text-muted">
+          {guideLength < MIN_GUIDE
+            ? `At least ${MIN_GUIDE} characters (${guideLength} so far).`
+            : `${guideLength} characters. More detail marks better.`}
+        </span>
       </label>
 
       <label className="block">
@@ -373,9 +434,14 @@ export default function NewAssignmentForm({
         </p>
       )}
 
-      <Button onClick={save} disabled={!ready} size="lg" full>
-        {busy ? "Saving" : "Save assignment"}
-      </Button>
+      <div>
+        <Button onClick={() => void save()} disabled={busy} size="lg" full>
+          {busy ? "Saving…" : "Save assignment"}
+        </Button>
+        {missing.length > 0 && !error && (
+          <p className="mt-2 text-center text-sm text-muted">To save: {missing.join(", ")}.</p>
+        )}
+      </div>
     </div>
   );
 }

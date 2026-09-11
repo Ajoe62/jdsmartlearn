@@ -354,6 +354,8 @@ Cache buckets, all versioned by deployment id:
 
 Files are opt-in per lesson ("Save it for offline") because a 10 MB PDF on a cheap Android is a real cost the student should choose. Bucket capped at 50 MB with LRU eviction, never evicting the lesson being read.
 
+Since 2026-09-11 a file over 4 MB is served by the file route as a redirect to a ten-minute presigned R2 address, because a Vercel function cannot send a body over 4.5 MB. "Save it for offline" follows that redirect, so it needs the bucket's CORS rule to allow `GET` ([r2-bucket-setup.md](r2-bucket-setup.md)). The saved copy is still stored under the same-origin route URL, so how it is served offline does not change. A file over the 50 MB cap can be opened online but not saved.
+
 The bytes live in the Cache API; the `files` IndexedDB store (schema v2) is the index over them, because the Cache API records no save time and LRU would otherwise be impossible. [`isFileSaved()`](../src/lib/offline/files.ts) checks **both** — a row without bytes means the browser evicted them, and the link must not render. Saving goes through the same authenticated route as any other request, so class scoping and the material-publish gate still apply: a student cannot save a file they may not read.
 
 Invalidation rides on the sync plan: a lesson in `remove` or `staleMaterials` has its saved file dropped, so a withdrawn or edited lesson cannot keep serving an old PDF.

@@ -145,6 +145,17 @@ export default async function SubmissionsPage({
       <p className="mt-1 text-sm text-muted">
         {submissions.length} of {students.length} students have sent work
       </p>
+      {assignment.fileKey && (
+        <p className="mt-1 text-sm">
+          <a
+            href={`/api/assignments/${encodeURIComponent(assignment.id)}/file`}
+            target="_blank"
+            className="font-medium text-brand"
+          >
+            Question sheet: {assignment.fileName ?? "open it"}
+          </a>
+        </p>
+      )}
 
       <SkipNotices reasons={skips} />
 

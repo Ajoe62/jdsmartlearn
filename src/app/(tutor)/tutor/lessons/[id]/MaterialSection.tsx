@@ -1,6 +1,8 @@
 "use client";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { TUTOR_UPLOAD_TYPES, acceptAttr, rejectTutorUpload } from "@/lib/storage/file-types";
+import { readApiError, uploadFile } from "@/lib/upload-client";
 
 /**
  * The raw lesson material with its own publish switch - independent of the study
@@ -22,26 +24,38 @@ export default function MaterialSection({
   const fileInput = useRef<HTMLInputElement>(null);
   const [published, setPublished] = useState(initialPublished);
   const [busy, setBusy] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  /** Upload progress 0..1, or null when nothing is uploading. */
+  const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function attachFile(picked: File) {
-    setUploading(true);
     setError(null);
+    const refusal = rejectTutorUpload(picked);
+    if (refusal) {
+      setError(refusal);
+      return;
+    }
+    setProgress(0);
     try {
-      const form = new FormData();
-      form.append("file", picked);
+      // Straight to storage first, then one small request to attach it.
+      const uploadKey = await uploadFile(picked, "lesson", { onProgress: setProgress });
       const res = await fetch(`/api/lessons/${lessonId}/file/upload`, {
         method: "POST",
-        body: form,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uploadKey, fileName: picked.name }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Storing the file failed. Try again.");
+      if (!res.ok) throw new Error(await readApiError(res, "Storing the file failed. Try again."));
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Storing the file failed. Try again.");
+      setError(
+        err instanceof TypeError
+          ? "We couldn't reach the server. Check your connection and try again."
+          : err instanceof Error
+            ? err.message
+            : "Storing the file failed. Try again."
+      );
     } finally {
-      setUploading(false);
+      setProgress(null);
       if (fileInput.current) fileInput.current.value = "";
     }
   }
@@ -55,8 +69,7 @@ export default function MaterialSection({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ publish: !published }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "We couldn't update the material.");
+      if (!res.ok) throw new Error(await readApiError(res, "We couldn't update the material."));
       setPublished(!published);
       router.refresh();
     } catch (err) {
@@ -65,6 +78,8 @@ export default function MaterialSection({
       setBusy(false);
     }
   }
+
+  const hasText = materialText.trim().length > 0;
 
   return (
     <section className="mt-6 rounded-lg border border-line">
@@ -90,14 +105,14 @@ export default function MaterialSection({
         </button>
       </div>
 
-      {error && <p className="px-4 pt-3 text-sm text-danger">{error}</p>}
+      {error && <p className="px-4 pt-3 text-sm text-danger" role="alert">{error}</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2">
         {file ? (
           <a
             href={`/api/lessons/${lessonId}/file`}
             target="_blank"
-            className="text-sm font-medium text-brand"
+            className="min-w-0 truncate text-sm font-medium text-brand"
           >
             {file.name} <span className="font-normal text-muted">({file.sizeLabel})</span>
           </a>
@@ -109,7 +124,7 @@ export default function MaterialSection({
         <input
           ref={fileInput}
           type="file"
-          accept=".pdf,.docx,.txt"
+          accept={acceptAttr(TUTOR_UPLOAD_TYPES)}
           className="hidden"
           onChange={(e) => {
             const picked = e.target.files?.[0];
@@ -118,16 +133,30 @@ export default function MaterialSection({
         />
         <button
           onClick={() => fileInput.current?.click()}
-          disabled={uploading}
+          disabled={progress !== null}
           className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted disabled:opacity-50"
         >
-          {uploading ? "Uploading…" : file ? "Replace file" : "Attach file"}
+          {progress !== null
+            ? `Uploading… ${Math.round(progress * 100)}%`
+            : file
+              ? "Replace file"
+              : "Attach file"}
         </button>
       </div>
 
-      <div className="max-h-64 overflow-y-auto whitespace-pre-wrap px-4 py-3 text-sm leading-relaxed text-muted">
-        {materialText}
-      </div>
+      {hasText ? (
+        <div className="max-h-64 overflow-y-auto whitespace-pre-wrap px-4 py-3 text-sm leading-relaxed text-muted">
+          {materialText}
+        </div>
+      ) : (
+        <p className="px-4 py-3 text-sm text-muted">
+          No lesson text yet.{" "}
+          {file
+            ? "Students will open the file above once you publish the material. "
+            : ""}
+          Add the text under Edit lesson to make a study guide.
+        </p>
+      )}
     </section>
   );
 }

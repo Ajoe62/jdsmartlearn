@@ -3,7 +3,7 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ["firebase-admin", "pdf-parse", "mammoth"],
+  serverExternalPackages: ["firebase-admin", "pdf-parse", "mammoth", "word-extractor"],
   experimental: {
     // Generation can take 20-40s. Verify your host's function timeout
     // before shipping; if it is lower, switch to the async status-polling

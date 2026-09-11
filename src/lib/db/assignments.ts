@@ -12,14 +12,27 @@ import type { Assignment } from "@/types/student-dashboard";
  * paying school. See docs/firestore-indexes-to-append.md before adding a query.
  */
 
+/**
+ * A fresh assignment id, WITHOUT writing anything. Lets a question sheet be
+ * stored under the assignment's own key before the document exists.
+ */
+export function newAssignmentId(): string {
+  return adminDb.collection(JD.assignments).doc().id;
+}
+
 export async function createAssignment(
-  data: Omit<Assignment, "id" | "createdAt" | "updatedAt">
+  data: Omit<Assignment, "id" | "createdAt" | "updatedAt">,
+  id?: string
 ): Promise<string> {
   assertWritable(JD.assignments);
   const now = Date.now();
-  const ref = await adminDb
-    .collection(JD.assignments)
-    .add({ ...data, createdAt: now, updatedAt: now });
+  const doc = { ...data, createdAt: now, updatedAt: now };
+  if (id) {
+    // create(), not set(): refuses rather than overwrites if an id ever repeated.
+    await adminDb.collection(JD.assignments).doc(id).create(doc);
+    return id;
+  }
+  const ref = await adminDb.collection(JD.assignments).add(doc);
   return ref.id;
 }
 

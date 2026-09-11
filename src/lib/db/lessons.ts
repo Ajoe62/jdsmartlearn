@@ -10,14 +10,28 @@ import type {
   StudentPayload,
 } from "@/types";
 
+/**
+ * A fresh lesson id, WITHOUT writing anything. Lets an uploaded file be stored
+ * under the lesson's own key before the lesson document exists, so the document
+ * is written once, already pointing at its file.
+ */
+export function newLessonId(): string {
+  return adminDb.collection(JD.lessons).doc().id;
+}
+
 export async function createLesson(
-  data: Omit<Lesson, "id" | "createdAt" | "updatedAt">
+  data: Omit<Lesson, "id" | "createdAt" | "updatedAt">,
+  id?: string
 ): Promise<string> {
   assertWritable(JD.lessons);
   const now = Date.now();
-  const ref = await adminDb
-    .collection(JD.lessons)
-    .add({ ...data, createdAt: now, updatedAt: now });
+  const doc = { ...data, createdAt: now, updatedAt: now };
+  if (id) {
+    // create(), not set(): refuses rather than overwrites if an id ever repeated.
+    await adminDb.collection(JD.lessons).doc(id).create(doc);
+    return id;
+  }
+  const ref = await adminDb.collection(JD.lessons).add(doc);
   return ref.id;
 }
 

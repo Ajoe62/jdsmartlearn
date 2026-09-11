@@ -9,7 +9,12 @@ import { STORE, del, get, put } from "@/lib/offline/db";
 import type { StoredDraft } from "@/lib/offline/db";
 import { queueSubmission } from "@/lib/offline/submissions";
 import { formatBytes } from "@/lib/format";
-import { MAX_SUBMISSION_FILES, rejectAttachment } from "@/lib/storage/file-types";
+import {
+  MAX_SUBMISSION_FILES,
+  extensionOf,
+  rejectAttachment,
+} from "@/lib/storage/file-types";
+import { readApiError, uploadFile } from "@/lib/upload-client";
 import type { StudentAssignment } from "@/types/student-dashboard";
 
 /**
@@ -24,9 +29,14 @@ import type { StudentAssignment } from "@/types/student-dashboard";
  *     existing wipe path is built to prevent.
  *  2. **Nothing is sent twice.** Submit disables in flight, and the server
  *     writes at a deterministic id so a replay reads as "already in".
+ *
+ * Files go straight from the phone to storage before the answer is sent, and a
+ * camera photo is shrunk first. Files never enter IndexedDB (CLAUDE.md).
  */
 
 const AUTOSAVE_MS = 800;
+/** Long edge of a shrunk photo. Plenty for a teacher, or the marking model, to read handwriting. */
+const PHOTO_EDGE = 1600;
 
 export default function SubmissionForm({
   assignment,
@@ -150,20 +160,50 @@ export default function SubmissionForm({
       return;
     }
 
-    const form = new FormData();
-    form.set("action", "submit");
-    form.set("assignmentId", assignment.assignmentId);
-    form.set("content", content.trim());
-    for (const file of files) form.append("files", file);
-
     try {
-      // XHR rather than fetch: it is the only way to report real upload progress,
-      // and a student on 3G sending a photo needs to see something moving.
-      await upload(form, setProgress);
+      /**
+       * Each file goes straight to storage first, then one small request hands
+       * in the answer with the upload keys. The bytes never pass through our
+       * server, whose platform refuses anything over 4.5 MB.
+       */
+      const ready: File[] = [];
+      for (const file of files) ready.push(await shrinkPhoto(file));
+      const total = ready.reduce((n, f) => n + f.size, 0);
+      const attachments: { uploadKey: string; name: string }[] = [];
+      let sent = 0;
+      if (total > 0) setProgress(0);
+      for (const file of ready) {
+        const uploadKey = await uploadFile(file, "submission", {
+          onProgress: (fraction) =>
+            setProgress(Math.round(((sent + fraction * file.size) / total) * 100)),
+        });
+        sent += file.size;
+        attachments.push({ uploadKey, name: file.name });
+      }
+
+      const res = await fetch("/api/student/assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          action: "submit",
+          assignmentId: assignment.assignmentId,
+          content: content.trim(),
+          attachments,
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res, "We couldn't send your work. Try again."));
+
       await del(STORE.drafts, assignment.assignmentId).catch(() => undefined);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "We couldn't send your work.");
+      setError(
+        err instanceof TypeError
+          ? "Your connection dropped. Try again."
+          : err instanceof Error
+            ? err.message
+            : "We couldn't send your work."
+      );
       setBusy(false);
       setProgress(null);
     }
@@ -183,6 +223,19 @@ export default function SubmissionForm({
       {assignment.description && (
         <p className="mt-4 whitespace-pre-wrap rounded-lg border border-line bg-surface p-4">
           {assignment.description}
+        </p>
+      )}
+
+      {assignment.file && (
+        <p className="mt-3 text-sm">
+          <a
+            href={`/api/assignments/${encodeURIComponent(assignment.assignmentId)}/file`}
+            target={assignment.file.inline ? "_blank" : undefined}
+            className="font-medium text-brand underline"
+          >
+            {assignment.file.inline ? "Open the question sheet" : "Download the question sheet"}
+          </a>{" "}
+          <span className="text-muted">({formatBytes(assignment.file.size)})</span>
         </p>
       )}
 
@@ -308,36 +361,31 @@ export default function SubmissionForm({
 }
 
 /**
- * POST the form with a real progress readout.
+ * Shrink a camera photo before it leaves the phone.
  *
- * Resolves only on a 2xx, and surfaces the server's own message on anything
- * else, so a student is told what to fix rather than that something went wrong.
+ * A modern phone photo is 3 to 8 MB. At 1600 px on the long side it is a few
+ * hundred KB, reads just as well, and sends in a fraction of the time on 3G.
+ * JPEG only: a PNG is usually a screenshot and already small, and converting it
+ * would change a file type the teacher may not accept. Any failure sends the
+ * original - shrinking is a courtesy, never a reason a child's work does not go.
  */
-function upload(form: FormData, onProgress: (percent: number) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/student/assignments");
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-        return;
-      }
-      let message = "We couldn't send your work. Try again.";
-      try {
-        const parsed = JSON.parse(xhr.responseText) as { error?: string };
-        if (parsed.error) message = parsed.error;
-      } catch {
-        // Not JSON. The default message stands.
-      }
-      reject(new Error(message));
-    };
-
-    xhr.onerror = () => reject(new Error("Your connection dropped. Try again."));
-    xhr.send(form);
-  });
+async function shrinkPhoto(file: File): Promise<File> {
+  const ext = extensionOf(file.name);
+  if ((ext !== ".jpg" && ext !== ".jpeg") || file.size < 700 * 1024) return file;
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = Math.min(1, PHOTO_EDGE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.82)
+    );
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
 }

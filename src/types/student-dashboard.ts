@@ -181,6 +181,21 @@ export interface Assignment {
   term: AcademicTerm;
   session: AcademicSession;
   isActive: boolean;
+  /**
+   * The question sheet the tutor attached, if any: a file students open or
+   * download, stored in R2 like a lesson's original and served only by
+   * /api/assignments/{id}/file. It is NOT the marking guide and shares nothing
+   * with it - the guide is text on this document, the sheet is a file the tutor
+   * chose to show.
+   *
+   * ABSENT when there is none. This is the one place absence is the signal,
+   * exactly as on Lesson.fileKey, so every assignment written before sheets
+   * existed reads correctly without a backfill.
+   */
+  fileKey?: string;
+  fileName?: string;
+  fileSize?: number;
+  fileType?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -207,6 +222,13 @@ export interface StudentAssignment {
    * so no student surface and no device store has to know what null meant.
    */
   allowedFileTypes: string[];
+  /**
+   * The question sheet, when the tutor attached one: a name and a size to show,
+   * never the R2 key. The link is the authenticated route
+   * `/api/assignments/{assignmentId}/file`. Optional because a copy saved on a
+   * phone by an earlier build has no such field.
+   */
+  file?: { name: string; size: number; inline: boolean } | null;
   /** Bumped whenever the tutor edits, so a device knows its copy is stale. */
   revision: number;
 }

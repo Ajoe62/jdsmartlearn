@@ -35,6 +35,49 @@ export function schemeFileKey(schoolId: string, schemeId: string, ext: string): 
   return `schemes/${schoolId}/${schemeId}${ext}`;
 }
 
+/** An assignment's question sheet. One per assignment. */
+export function assignmentFileKey(schoolId: string, assignmentId: string, ext: string): string {
+  return `assignments/${schoolId}/${assignmentId}/sheet${ext}`;
+}
+
+/**
+ * Where a browser puts bytes before any document points at them.
+ *
+ * Uploads go straight from the phone to R2 on a presigned address, because a
+ * Vercel function refuses any request over 4.5 MB. The server cannot vouch for
+ * those bytes until a route CLAIMS them - checks the owner, the size and the
+ * type, then copies them to the permanent key built by the functions above. So
+ * they land here first, under the school and the uploader.
+ *
+ * An upload that is never claimed - a tutor who closed the tab - is litter, and
+ * the bucket's lifecycle rule deletes everything under this prefix after a day
+ * (docs/r2-bucket-setup.md). Nothing needs a Firestore record of it.
+ *
+ * `actorId` is namespaced (`t-{uid}` or `s-{studentId}`) so a tutor uid and a
+ * student id can never name the same folder.
+ */
+export const STAGING_PREFIX = "uploads/";
+
+export function stagingKey(schoolId: string, actorId: string, token: string, ext: string): string {
+  return `${STAGING_PREFIX}${schoolId}/${actorId}/${token}${ext}`;
+}
+
+const TOKEN_AND_EXT = /^[A-Za-z0-9]{16,64}\.[a-z0-9]{1,5}$/;
+
+/**
+ * Whether `key` is a staging key written by THIS actor in THIS school.
+ *
+ * The only thing standing between a crafted request and claiming somebody
+ * else's upload, so it is strict: the exact prefix, then a single segment of
+ * token and extension with no slash left to smuggle a path through.
+ */
+export function ownsStagingKey(key: string, schoolId: string, actorId: string): boolean {
+  if (!schoolId || !actorId || schoolId.includes("/") || actorId.includes("/")) return false;
+  const prefix = stagingKey(schoolId, actorId, "", "");
+  if (!key.startsWith(prefix)) return false;
+  return TOKEN_AND_EXT.test(key.slice(prefix.length));
+}
+
 /** One attachment on a student's submission, numbered in upload order. */
 export function submissionAttachmentKey(
   schoolId: string,

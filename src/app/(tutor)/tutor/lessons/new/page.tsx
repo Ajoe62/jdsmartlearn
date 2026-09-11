@@ -10,6 +10,7 @@ import {
 import { isAwaitingAllocation } from "@/lib/auth/subject-access";
 import { listTopics } from "@/lib/db/topics";
 import { classLevel } from "@/lib/class-level";
+import { storageConfigured } from "@/lib/storage/provider";
 import AwaitingAllocation from "@/components/tutor/AwaitingAllocation";
 import NewLessonForm from "./NewLessonForm";
 
@@ -72,6 +73,9 @@ export default async function NewLessonPage() {
             level: t.level,
             title: t.title,
           }))}
+          // Without R2 there is nowhere to put a file: paste only, as CLAUDE.md
+          // requires ("uploads gracefully degrade to text-only").
+          filesAvailable={storageConfigured()}
         />
       )}
     </main>

@@ -7,7 +7,7 @@ import {
 } from "@/lib/auth/tutor";
 import { getAssignment } from "@/lib/db/assignments";
 import { getSubmission, submissionId } from "@/lib/db/submissions";
-import { getFile, STORABLE_TYPES } from "@/lib/storage/provider";
+import { serveStoredFile } from "@/lib/storage/serve";
 
 /**
  * Serve one attachment from a submission. NEVER public.
@@ -24,7 +24,7 @@ import { getFile, STORABLE_TYPES } from "@/lib/storage/provider";
  * submission for that assignment or a 404.
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ assignmentId: string; index: string }> }
 ) {
   const { assignmentId, index } = await ctx.params;
@@ -67,8 +67,7 @@ export async function GET(
       );
     }
     // A tutor names the student explicitly; a student never can.
-    const url = new URL(_req.url);
-    targetStudentId = url.searchParams.get("student");
+    targetStudentId = new URL(req.url).searchParams.get("student");
     if (!targetStudentId) {
       return NextResponse.json({ error: "File not found." }, { status: 404 });
     }
@@ -78,17 +77,12 @@ export async function GET(
   const attachment = submission?.attachments[position];
   if (!attachment) return NextResponse.json({ error: "File not found." }, { status: 404 });
 
-  const stored = await getFile(attachment.key);
-  if (!stored) return NextResponse.json({ error: "File not found." }, { status: 404 });
-
-  const inline = Object.values(STORABLE_TYPES).find((t) => t.mime === attachment.type)?.inline;
-
-  return new NextResponse(new Uint8Array(stored.body), {
-    headers: {
-      "Content-Type": attachment.type,
-      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(attachment.name)}"`,
-      // Private: this is one child's work, and shared phones are the norm.
-      "Cache-Control": "private, no-store",
-    },
+  return serveStoredFile({
+    key: attachment.key,
+    name: attachment.name,
+    fallbackName: "attachment",
+    size: attachment.size,
+    // Private: this is one child's work, and shared phones are the norm.
+    cacheControl: "private, no-store",
   });
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import Callout from "@/components/ui/Callout";
 import {
   getTutorSession,
   assertClassAccess,
@@ -8,6 +9,7 @@ import {
 import { getLesson, getGeneratedContent } from "@/lib/db/lessons";
 import { countLessonReaders } from "@/lib/db/lesson-views";
 import { listClassesForSchool } from "@/lib/db/resultpeak";
+import { MIN_USABLE_CHARS } from "@/lib/extract/text";
 import { formatBytes } from "@/lib/format";
 import ReviewLesson from "./ReviewLesson";
 import MaterialSection from "./MaterialSection";
@@ -50,6 +52,13 @@ export default async function LessonReviewPage({
     session.isAdmin ? listClassesForSchool(session.schoolId) : Promise.resolve([]),
   ]);
 
+  /**
+   * A lesson made from a scan, a slide deck or a photo has no text (owner's
+   * decision, 2026-09-11: keep the file, ask for the text). Same floor the
+   * generate route enforces, so this screen and that refusal cannot disagree.
+   */
+  const canGenerate = (lesson.extractedText ?? "").trim().length >= MIN_USABLE_CHARS;
+
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
       <Link href="/tutor" className="text-sm text-muted">
@@ -69,6 +78,18 @@ export default async function LessonReviewPage({
           </>
         )}
       </p>
+
+      {!canGenerate && !content && (
+        <Callout
+          tone="warn"
+          className="mt-6"
+          title={lesson.fileKey ? "We couldn't read the text in your file" : "This lesson needs more text"}
+        >
+          {lesson.fileKey
+            ? "Your file is saved, and students can open it once you publish the material below. To make a study guide, add the lesson text under Edit lesson."
+            : `Add at least ${MIN_USABLE_CHARS} characters under Edit lesson to make a study guide.`}
+        </Callout>
+      )}
 
       <EditLessonSection
         lessonId={lesson.id}
@@ -99,6 +120,7 @@ export default async function LessonReviewPage({
       <ReviewLesson
         lessonId={lesson.id}
         status={lesson.status}
+        canGenerate={canGenerate}
         content={
           content
             ? {

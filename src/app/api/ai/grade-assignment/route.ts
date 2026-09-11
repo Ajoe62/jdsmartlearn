@@ -140,8 +140,23 @@ export async function POST(req: Request) {
   let submissionText = submission.content;
   const images: ImagePart[] = [];
 
+  /**
+   * Past this an image is not sent to the model: the provider takes about 20 MB
+   * for a whole request, inline. Photos are shrunk on the phone before upload,
+   * so this is a rare original the tutor marks by hand - the same outcome as an
+   * attachment nothing can read.
+   */
+  const MAX_IMAGE_BYTES = 7 * 1024 * 1024;
+
   for (const attachment of submission.attachments) {
     try {
+      if (attachment.type.startsWith("image/") && attachment.size > MAX_IMAGE_BYTES) {
+        step(
+          `attachment:${attachment.name}`,
+          new Error(`image of ${attachment.size} bytes is over the model's inline limit`)
+        );
+        continue;
+      }
       const stored = await getFile(attachment.key);
       if (!stored) continue;
 

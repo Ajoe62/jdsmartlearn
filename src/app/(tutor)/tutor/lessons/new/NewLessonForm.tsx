@@ -5,8 +5,15 @@ import { Button } from "@/components/ui/Button";
 import Callout from "@/components/ui/Callout";
 import { Card, CardHeader } from "@/components/ui/Card";
 import Field, { CONTROL } from "@/components/ui/Field";
+import FileUploadField, { type UploadedFile } from "@/components/tutor/FileUploadField";
 import { classesForSubject, subjectsForClass } from "@/lib/auth/subject-access";
 import { newLocalId, queueOp } from "@/lib/offline/tutor-outbox";
+import {
+  MAX_TUTOR_FILE_BYTES,
+  TUTOR_UPLOAD_LABEL,
+  formatLimit,
+} from "@/lib/storage/file-types";
+import { readApiError } from "@/lib/upload-client";
 import type { ClassLevel } from "@/types";
 
 type ClassOpt = { id: string; name: string; level?: ClassLevel };
@@ -26,12 +33,15 @@ export default function NewLessonForm({
   subjects,
   topics,
   teachable,
+  filesAvailable,
 }: {
   classes: ClassOpt[];
   subjects: SubjectOpt[];
   topics: TopicOpt[];
   /** subjectId -> classIds. `{}` means no restriction - see subject-access. */
   teachable: Record<string, string[]>;
+  /** False when R2 is not configured: the lesson must be pasted. */
+  filesAvailable: boolean;
 }) {
   const router = useRouter();
   const [classId, setClassId] = useState("");
@@ -40,7 +50,9 @@ export default function NewLessonForm({
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<"paste" | "upload">("paste");
   const [text, setText] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  /** The file, once it has reached storage. Null while it is still uploading. */
+  const [upload, setUpload] = useState<UploadedFile | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(true);
@@ -49,10 +61,9 @@ export default function NewLessonForm({
    * Offline, only pasted text can be composed.
    *
    * Text validates on the device against the same 200-character floor the server
-   * uses, so the tutor gets real feedback with no signal. A file cannot: extraction
-   * happens server-side, so they would only learn a PDF was an unreadable scan days
-   * later when it uploaded. Better to say so up front than to accept work we cannot
-   * check (see docs/OFFLINE-FIRST.md).
+   * uses, so the tutor gets real feedback with no signal. A file cannot even
+   * start: it goes straight to storage, which needs a connection, and the
+   * outbox deliberately holds no files (see docs/OFFLINE-FIRST.md).
    */
   useEffect(() => {
     const sync = () => {
@@ -156,7 +167,7 @@ export default function NewLessonForm({
     if (topic && !title.trim()) setTitle(topic.title);
   }
 
-  const contentReady = mode === "paste" ? text.trim().length >= MIN_CHARS : !!file;
+  const contentReady = mode === "paste" ? text.trim().length >= MIN_CHARS : !!upload;
   const canSubmit = !!classId && !!subjectId && !!topicId && !!title.trim() && contentReady;
 
   // Tell the tutor exactly what's missing instead of a silently disabled button.
@@ -169,26 +180,32 @@ export default function NewLessonForm({
     missing.push(
       mode === "paste"
         ? `paste at least ${MIN_CHARS} characters (${text.trim().length} so far)`
-        : "choose a file"
+        : uploading
+          ? "wait for the file to finish uploading"
+          : "choose a file"
     );
+  }
+
+  async function queueOffline(): Promise<boolean> {
+    // className and subjectId are omitted deliberately - the server derives
+    // both, so a queued op replayed days later cannot carry a stale class name.
+    return queueOp({
+      kind: "create",
+      target: newLocalId(),
+      title: title.trim(),
+      classId,
+      topicId,
+      text,
+    });
   }
 
   async function submit() {
     setBusy(true);
     setError(null);
 
-    // No signal: queue it and let the outbox upload it on reconnect. className and
-    // subjectId are omitted deliberately - the server derives both, so a queued op
-    // replayed days later cannot carry a stale class name.
+    // No signal: queue it and let the outbox upload it on reconnect.
     if (!online) {
-      const ok = await queueOp({
-        kind: "create",
-        target: newLocalId(),
-        title: title.trim(),
-        classId,
-        topicId,
-        text,
-      });
+      const ok = await queueOffline();
       if (!ok) {
         setError(
           "This phone can't save work offline. Connect to the internet and try again."
@@ -205,38 +222,45 @@ export default function NewLessonForm({
       form.set("classId", classId);
       form.set("topicId", topicId);
       form.set("title", title.trim());
-      if (mode === "paste") form.set("text", text);
-      else if (file) form.set("file", file);
+      if (mode === "paste") {
+        form.set("text", text);
+      } else if (upload) {
+        // The file itself is already in storage; this names it.
+        form.set("uploadKey", upload.uploadKey);
+        form.set("fileName", upload.name);
+      }
 
       const res = await fetch("/api/lessons", { method: "POST", body: form });
+      if (!res.ok) throw new Error(await readApiError(res, "We couldn't create this lesson."));
       const data = (await res.json().catch(() => ({}))) as {
         lessonId?: string;
-        error?: string;
+        textFound?: boolean;
       };
-      if (!res.ok) throw new Error(data.error ?? "We couldn't create this lesson.");
-      router.push("/tutor");
+      // No readable text in the file: open the lesson, which says what to do next.
+      router.push(
+        data.lessonId && data.textFound === false ? `/tutor/lessons/${data.lessonId}` : "/tutor"
+      );
     } catch (err) {
       // The request itself failed rather than being rejected - if the link died
-      // mid-submit, keep the work instead of making them retype it.
-      if (!navigator.onLine) {
-        const ok = await queueOp({
-          kind: "create",
-          target: newLocalId(),
-          title: title.trim(),
-          classId,
-          topicId,
-          text,
-        });
-        if (ok) {
+      // mid-submit, keep typed work instead of making them retype it. An
+      // uploaded file cannot be queued, and does not need to be: it is already
+      // in storage, so Create draft works again once the signal is back.
+      if (!navigator.onLine && mode === "paste") {
+        if (await queueOffline()) {
           router.push("/tutor");
           return;
         }
       }
-      setError(err instanceof Error ? err.message : "We couldn't create this lesson.");
+      setError(
+        err instanceof TypeError
+          ? "We couldn't reach the server. Check your connection and try again."
+          : err instanceof Error
+            ? err.message
+            : "We couldn't create this lesson."
+      );
       setBusy(false);
     }
   }
-
 
   return (
     <div className="mt-6 space-y-5">
@@ -442,16 +466,23 @@ export default function NewLessonForm({
               <ModeTab
                 active={mode === "upload"}
                 onClick={() => setMode("upload")}
-                disabled={!online}
+                disabled={!online || !filesAvailable}
                 label="Upload a file"
               />
             </div>
 
-            {!online && (
+            {!online ? (
               <p className="mt-2 text-sm text-muted">
-                You&rsquo;ll need internet to upload a file. We can only check a file can
-                be read once it reaches us.
+                You&rsquo;ll need internet to upload a file. It goes straight to your
+                school&rsquo;s file storage.
               </p>
+            ) : (
+              !filesAvailable && (
+                <p className="mt-2 text-sm text-muted">
+                  File uploads aren&rsquo;t set up for your school yet. Paste the lesson
+                  text instead.
+                </p>
+              )
             )}
 
             {mode === "paste" ? (
@@ -472,17 +503,16 @@ export default function NewLessonForm({
               </>
             ) : (
               <div className="mt-2">
-                <input
-                  type="file"
-                  accept=".pdf,.docx,.txt"
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                  aria-label="Lesson file"
-                  className="w-full rounded-lg border border-dashed border-lineStrong bg-canvas p-3 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white"
+                <FileUploadField
+                  id="lesson-file"
+                  label="Lesson file"
+                  hint={`${TUTOR_UPLOAD_LABEL}, up to ${formatLimit(MAX_TUTOR_FILE_BYTES)}. We read the text from PDF and Word files. Students can open the original once you publish the material.`}
+                  purpose="lesson"
+                  value={upload}
+                  onChange={setUpload}
+                  onBusyChange={setUploading}
+                  disabled={busy}
                 />
-                <p className="mt-1.5 text-sm text-muted">
-                  PDF, Word (.docx), or text file, up to 10 MB. Students can open the
-                  original file once you publish the material.
-                </p>
               </div>
             )}
           </div>

@@ -85,7 +85,9 @@ export const PURGE_PLAN: readonly PurgeTarget[] = [
   {
     collection: JD.assignments,
     scope: { kind: "schoolIdField" },
-    holds: "homework set by tutors, including marking guides",
+    // Question sheets, since 2026-09-11. Keys are `assignments/{schoolId}/...`.
+    files: { fields: ["fileKey"], extract: fileKey, prefixedBySchool: true },
+    holds: "homework set by tutors, including marking guides and question sheets",
   },
   {
     collection: JD.submissions,

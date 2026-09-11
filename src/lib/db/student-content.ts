@@ -194,11 +194,17 @@ export function getStudentLesson(schoolId: string, classId: string, lessonId: st
         topicTitle = topic?.title ?? lesson.title;
       }
 
-      const material = lesson.materialPublishedAt ? lesson.extractedText : null;
+      /**
+       * "" IS A REAL ANSWER HERE. A lesson whose original is a scan, a slide
+       * deck or a photo has no text; its material is the file alone. So test
+       * for null (unpublished), never for falsiness, or a published file-only
+       * lesson would vanish from the student's screen.
+       */
+      const material = lesson.materialPublishedAt ? (lesson.extractedText ?? "") : null;
 
       // Original-file info rides with the material's publish switch.
       const file =
-        material && lesson.fileKey && lesson.fileName
+        material !== null && lesson.fileKey && lesson.fileName
           ? {
               name: lesson.fileName,
               size: lesson.fileSize ?? 0,
@@ -213,7 +219,7 @@ export function getStudentLesson(schoolId: string, classId: string, lessonId: st
         : null;
 
       // Nothing published for this lesson yet - treat as not found.
-      if (!material && !studyGuide) return null;
+      if (material === null && !studyGuide) return null;
 
       return {
         lessonId,

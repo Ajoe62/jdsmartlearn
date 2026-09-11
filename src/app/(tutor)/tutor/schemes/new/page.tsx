@@ -13,6 +13,7 @@ import {
   listClassesForSchool,
 } from "@/lib/db/resultpeak";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
+import { storageConfigured } from "@/lib/storage/provider";
 
 /**
  * Upload a scheme of work.
@@ -79,6 +80,7 @@ export default async function NewSchemePage() {
           classes={classes.map((c) => ({ id: c.id, name: c.name }))}
           subjects={subjects}
           teachable={teachable}
+          filesAvailable={storageConfigured()}
         />
       )}
     </main>

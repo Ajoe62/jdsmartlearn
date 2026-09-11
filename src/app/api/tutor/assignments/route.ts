@@ -7,14 +7,29 @@ import {
   assertSubjectAccess,
 } from "@/lib/auth/tutor";
 import { getSubjects } from "@/lib/db/resultpeak";
-import { createAssignment, writeNotification } from "@/lib/db/assignments";
+import {
+  createAssignment,
+  newAssignmentId,
+  writeNotification,
+} from "@/lib/db/assignments";
 import { writeAuditLog } from "@/lib/db/lessons";
 import { SUBMITTABLE_TYPES } from "@/lib/storage/file-types";
+import { assignmentFileKey } from "@/lib/storage/keys";
+import {
+  UploadError,
+  claimUpload,
+  discardClaimed,
+  fileFields,
+  tutorActor,
+  type ClaimedFile,
+} from "@/lib/storage/uploads";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
 import { isKnownSession, isKnownTerm } from "@/lib/academic-calendar";
 import { ASSIGNMENT_TYPES } from "@/types/student-dashboard";
 import type { AssignmentType } from "@/types/student-dashboard";
 import type { Lesson, ResultPeakClass } from "@/types";
+
+export const maxDuration = 60;
 
 /**
  * Create an assignment.
@@ -22,6 +37,11 @@ import type { Lesson, ResultPeakClass } from "@/types";
  * Authorization is server-side and unconditional: the class must be in the
  * tutor's assignedClasses, read fresh from ResultPeak on this request. The form
  * hiding a class it should not offer is a convenience, not a control.
+ *
+ * An optional question sheet arrives as a staging key (`uploadKey`), not bytes:
+ * the browser has already put the file in R2. It is claimed only after every
+ * check below, so a sheet cannot be attached to a class or subject the tutor
+ * does not teach.
  */
 
 const MAX_TITLE = 120;
@@ -43,6 +63,9 @@ interface Body {
   term?: string;
   session?: string;
   isActive?: boolean;
+  /** Staging key of an uploaded question sheet. */
+  uploadKey?: string | null;
+  fileName?: string;
 }
 
 function bad(message: string, status = 400) {
@@ -175,32 +198,62 @@ export async function POST(req: Request) {
 
   const isActive = body.isActive !== false;
 
-  const assignmentId = await createAssignment({
-    schoolId: session.schoolId,
-    classId,
-    className: cls.name,
-    subjectId,
-    subjectName: subject.name,
-    tutorId: session.uid,
-    title,
-    description,
-    type,
-    dueDate,
-    maxMarks,
-    markingGuide,
-    linkedLessonId,
-    allowedFileTypes,
-    term,
-    session: academicSession,
-    isActive,
-  });
+  /**
+   * The id first, so the sheet is stored under the assignment's own key before
+   * the document exists; if the write then fails, the sheet is removed.
+   */
+  const assignmentId = newAssignmentId();
+  let sheet: ClaimedFile | null = null;
+  if (body.uploadKey) {
+    try {
+      sheet = await claimUpload(
+        tutorActor(session),
+        "assignment",
+        body.uploadKey,
+        body.fileName,
+        (ext) => assignmentFileKey(session.schoolId, assignmentId, ext)
+      );
+    } catch (err) {
+      if (err instanceof UploadError) return bad(err.message, err.status);
+      throw err;
+    }
+  }
+
+  try {
+    await createAssignment(
+      {
+        schoolId: session.schoolId,
+        classId,
+        className: cls.name,
+        subjectId,
+        subjectName: subject.name,
+        tutorId: session.uid,
+        title,
+        description,
+        type,
+        dueDate,
+        maxMarks,
+        markingGuide,
+        linkedLessonId,
+        allowedFileTypes,
+        term,
+        session: academicSession,
+        isActive,
+        ...(sheet ? fileFields(sheet) : {}),
+      },
+      assignmentId
+    );
+  } catch (err) {
+    await discardClaimed(sheet);
+    throw err;
+  }
 
   await writeAuditLog({
     schoolId: session.schoolId,
     actorUid: session.uid,
     action: "assignment.create",
     entityId: assignmentId,
-    detail: `${type} for ${cls.name}, ${maxMarks} marks`,
+    detail: `${type} for ${cls.name}, ${maxMarks} marks${sheet ? ", with question sheet" : ""}`,
   });
 
   /**

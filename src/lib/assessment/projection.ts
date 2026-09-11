@@ -19,7 +19,7 @@
  *     (CLAUDE.md, Assessment rules).
  */
 
-import { resolveAllowedFileTypes } from "@/lib/storage/file-types";
+import { inlineable, resolveAllowedFileTypes } from "@/lib/storage/file-types";
 import type {
   Assignment,
   AssignmentSubmission,
@@ -52,6 +52,12 @@ export function toStudentAssignment(a: Assignment): StudentAssignment {
     // and every student surface downstream gets a concrete list instead of
     // having to decide for itself what a missing value meant.
     allowedFileTypes: resolveAllowedFileTypes(a.allowedFileTypes),
+    // The question sheet: a name and a size, never the R2 key. The link is the
+    // authenticated route /api/assignments/{id}/file.
+    file:
+      a.fileKey && a.fileName
+        ? { name: a.fileName, size: a.fileSize ?? 0, inline: inlineable(a.fileType) }
+        : null,
     revision: a.updatedAt,
   };
 }

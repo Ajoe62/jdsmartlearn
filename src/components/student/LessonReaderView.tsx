@@ -22,6 +22,11 @@ import type { StudentLessonDetail } from "@/types";
  *
  * `StudentLessonDetail` has no field a marking guide could occupy, which is the
  * type-level half of the guarantee in CLAUDE.md.
+ *
+ * `material` is null when the material is NOT PUBLISHED, and "" when it is
+ * published but has no text - a lesson whose original is a scan, slides or a
+ * photo. Every test below is against null, never falsiness, or that lesson
+ * would render as empty.
  */
 export default function LessonReaderView({
   lessonId,
@@ -106,7 +111,9 @@ export default function LessonReaderView({
               savedAt: Date.now(),
             });
           }
-          if (initial.material) {
+          // Saved even when empty: "published, but it's a file" must survive
+          // going offline as itself, not as "not saved yet".
+          if (initial.material !== null) {
             const existing = await get<StoredMaterial>(STORE.materials, lessonId);
             if (!existing) void saveMaterial(lessonId);
           }
@@ -185,7 +192,7 @@ export default function LessonReaderView({
     );
   }
 
-  const hasNothing = !lesson.material && !lesson.studyGuide;
+  const hasNothing = lesson.material === null && !lesson.studyGuide;
 
   return (
     <main className="mx-auto max-w-readable px-5 py-8">
@@ -201,7 +208,7 @@ export default function LessonReaderView({
         </Callout>
       )}
 
-      {lesson.material && (
+      {lesson.material !== null && (
         <section className="mt-8">
           <h2 className="text-heading">Lesson material</h2>
 
@@ -236,7 +243,9 @@ export default function LessonReaderView({
           {unsavedFile && (
             <Callout tone="neutral" className="mt-3">
               The original file ({unsavedFile.name}) isn&rsquo;t saved on your phone.
-              You can still read the lesson text below.
+              {lesson.material
+                ? " You can still read the lesson text below."
+                : " Connect to the internet to open it."}
             </Callout>
           )}
 
@@ -246,7 +255,15 @@ export default function LessonReaderView({
             </Callout>
           )}
 
-          <article className="prose-lesson mt-4 whitespace-pre-wrap">{lesson.material}</article>
+          {lesson.material ? (
+            <article className="prose-lesson mt-4 whitespace-pre-wrap">{lesson.material}</article>
+          ) : (
+            lesson.file && (
+              <p className="mt-4 text-muted">
+                Your teacher shared this lesson as a file. Open it with the button above.
+              </p>
+            )
+          )}
         </section>
       )}
 
