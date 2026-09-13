@@ -2,8 +2,8 @@ import "server-only";
 import { unstable_cache } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
 import { RP, QUERY_LIMIT } from "./collections";
-import { teachableMap } from "@/lib/auth/subject-access";
-import type { SubjectAllocation } from "@/lib/auth/subject-access";
+import { pickerAllocation } from "@/lib/auth/subject-access";
+import type { PickerAllocation, SubjectAllocation } from "@/lib/auth/subject-access";
 import type { ResultPeakClass, ResultPeakSchool, ResultPeakStudent } from "@/types";
 
 /**
@@ -74,24 +74,26 @@ export async function getSubjects(schoolId: string) {
 }
 
 /**
- * What a picker may offer: subjectId -> classIds, for the tutor's own allocation.
+ * What a picker may offer: subjectId -> classIds, for the tutor's own allocation,
+ * plus the held classes that allocation gives no subject in.
  *
- * `{}` means NO RESTRICTION - an unallocated tutor, or an admin - and both forms
- * read it that way. Keeping that convention in one place is what stops each form
- * inventing its own idea of the legacy state.
+ * `{}` means NO RESTRICTION - an unallocated tutor, or an admin - and every form
+ * reads it that way. Keeping that convention in one place is what stops each form
+ * inventing its own idea of the legacy state. See pickerAllocation() for what an
+ * unmatched class offers, and why it exists.
  *
  * Costs no extra Firestore read beyond the subject list the pages already fetch,
  * and nothing here is cached on the device: the allocation is re-read from the
  * session on every request, exactly as assignedClasses is, so a revocation in
  * ResultPeak applies immediately (CLAUDE.md, Tutor offline).
  */
-export async function getTeachableMap(
+export async function getPickerAllocation(
   schoolId: string,
   allocation: SubjectAllocation,
   heldClassIds: string[]
-): Promise<Record<string, string[]>> {
+): Promise<PickerAllocation> {
   const subjects = await getSubjects(schoolId);
-  return teachableMap(
+  return pickerAllocation(
     allocation,
     subjects.map((s) => s.id),
     heldClassIds

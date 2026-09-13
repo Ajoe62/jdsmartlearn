@@ -15,7 +15,7 @@ Everything else is out of scope. If a feature does not make that loop faster or 
 ## Who uses it
 
 - **Tutors (teachers)** — non-technical, 4–8 subjects each, mid-range Android phones. Must reach first publish in under 30 minutes with no training.
-- **Students** — Primary 1 to SS3. Log in with school + username (`jss3-04`) + access code. No email, no app. The school is picked once and remembered on the phone; the username never is, because phones are shared.
+- **Students** — Pre-nursery to SS3. Pre-nursery and nursery were added on 2026-09-13, on the owner's decision; those children cannot read yet, so their material is written to be read aloud (the `early_years` band in `src/lib/ai/prompt.ts`). The level list lives in one place, `LEVEL_LABELS` in `src/lib/class-level.ts`. Log in with school + username (`jss3-04`) + access code. No email, no app. The school is picked once and remembered on the phone; the username never is, because phones are shared.
 - **Admins** — school admins, already managing rosters in ResultPeak.
 
 Design for a 360px screen on a throttled 3G connection first. Server-render wherever possible; keep client JS minimal on student pages.
@@ -179,7 +179,7 @@ Offline-first is in scope for the student reader. The network in the schools usi
 - Current provider: **Gemini free tier**, using native structured output. Validate every response with the Zod schema in `src/lib/ai/schema.ts`. On validation failure, retry once, then show a friendly error with a retry action.
 - **Teacher review before publish is mandatory.** Generated content is never student-visible until a tutor clicks Publish. Always show the "AI-generated — review before publishing" notice on the review screen.
 - Log every generation: token counts, latency, computed would-be cost, and whether the tutor edited before publishing. These are the core product metrics.
-- Reading level must match class level — see the bands in `src/lib/ai/prompt.ts`. Primary output is the most likely failure mode; do not loosen those instructions.
+- Reading level must match class level — see the bands in `src/lib/ai/prompt.ts`. Primary output is the most likely failure mode; do not loosen those instructions. Pre-nursery and nursery use the strictest band, `early_years`: written to be read aloud to children who cannot read, with questions answered out loud.
 - Rate limit: 20 generations per tutor per day.
 
 ## Assessment rules

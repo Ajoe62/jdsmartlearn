@@ -3,7 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import FileUploadField, { type UploadedFile } from "@/components/tutor/FileUploadField";
-import { classesForSubject, subjectsForClass } from "@/lib/auth/subject-access";
+import {
+  classesForSubject,
+  subjectsForClass,
+  unmatchedState,
+  type UnmatchedClasses,
+} from "@/lib/auth/subject-access";
+import UnmatchedClassNote from "@/components/tutor/UnmatchedClassNote";
 import { CONTROL } from "@/components/ui/Field";
 import {
   MAX_TUTOR_FILE_BYTES,
@@ -45,6 +51,7 @@ export default function NewAssignmentForm({
   classes,
   subjects,
   teachable,
+  unmatched,
   lessons,
   defaultTerm,
   defaultSession,
@@ -55,6 +62,8 @@ export default function NewAssignmentForm({
   subjects: SubjectOpt[];
   /** subjectId -> classIds. `{}` means no restriction - see subject-access. */
   teachable: Record<string, string[]>;
+  /** Held classes with no subject set for this tutor - see pickerAllocation(). */
+  unmatched: UnmatchedClasses;
   lessons: LessonOpt[];
   /** Prefilled from the school setting. Never blank. */
   defaultTerm: string;
@@ -114,11 +123,21 @@ export default function NewAssignmentForm({
 
   const guideLength = markingGuide.trim().length;
 
+  /**
+   * The chosen class has no subject set for this tutor in ResultPeak: "open"
+   * lists every subject, "blocked" none. Either way the form says why, so the
+   * subject box is never silently empty. See pickerAllocation().
+   */
+  const classGap = unmatchedState(unmatched, classId);
+  const selectedClassName = classes.find((c) => c.id === classId)?.name ?? "";
+
   // Everything Save needs, in the words a teacher would use.
   const missing: string[] = [];
   if (!title.trim()) missing.push("add a title");
   if (!classId) missing.push("choose a class");
-  if (!subjectId) missing.push("choose a subject");
+  if (!subjectId) {
+    missing.push(classGap === "blocked" ? "choose a class you have subjects in" : "choose a subject");
+  }
   if (!due) missing.push("choose a due date");
   if (guideLength < MIN_GUIDE) {
     missing.push(
@@ -236,9 +255,12 @@ export default function NewAssignmentForm({
               setClassId("");
             }
           }}
+          disabled={classGap === "blocked"}
           className={CONTROL}
         >
-          <option value="">Choose a subject</option>
+          <option value="">
+            {classGap === "blocked" ? "No subjects for this class" : "Choose a subject"}
+          </option>
           {subjectOptions.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -246,6 +268,10 @@ export default function NewAssignmentForm({
           ))}
         </select>
       </label>
+
+      {classGap && selectedClassName && (
+        <UnmatchedClassNote classLabel={selectedClassName} state={classGap} noun="work" />
+      )}
 
       <label className="block">
         <span className="text-sm font-medium">Instructions for students</span>

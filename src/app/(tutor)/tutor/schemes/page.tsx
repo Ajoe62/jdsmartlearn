@@ -7,15 +7,20 @@ import EmptyState from "@/components/ui/EmptyState";
 import PageHeader, { NavPill, NavPills } from "@/components/ui/PageHeader";
 import AwaitingAllocation from "@/components/tutor/AwaitingAllocation";
 import SchemeRow from "@/components/tutor/SchemeRow";
+import UnmatchedClassNote from "@/components/tutor/UnmatchedClassNote";
 import { getTutorSession } from "@/lib/auth/tutor";
 import { listSchemesForSchoolClasses } from "@/lib/db/schemes";
 import {
   getClassesByIds,
   getSubjects,
-  getTeachableMap,
+  getPickerAllocation,
   listClassesForSchool,
 } from "@/lib/db/resultpeak";
-import { isAwaitingAllocation, subjectsForClass } from "@/lib/auth/subject-access";
+import {
+  authorsNothing,
+  subjectsForClass,
+  unmatchedState,
+} from "@/lib/auth/subject-access";
 import type { Scheme } from "@/types/schemes";
 
 /**
@@ -43,7 +48,7 @@ export default async function SchemesPage() {
     getSubjects(session.schoolId),
   ]);
 
-  const teachable = await getTeachableMap(
+  const { teachable, unmatched } = await getPickerAllocation(
     session.schoolId,
     session,
     classes.map((c) => c.id)
@@ -61,7 +66,11 @@ export default async function SchemesPage() {
     byPair.set(key, [...(byPair.get(key) ?? []), scheme]);
   }
 
+  // A class with no subject set for this tutor is not counted. With enforcement
+  // off it lists every school subject, and thirty-odd "missing" schemes for a
+  // class nobody allocated would bury the real gaps. It gets its own note below.
   const missing = classes.reduce((total, c) => {
+    if (unmatched.classIds.includes(c.id)) return total;
     const offered = subjectsForClass(teachable, subjects, c.id);
     return total + offered.filter((s) => !byPair.has(`${c.id}\t${s.id}`)).length;
   }, 0);
@@ -92,7 +101,7 @@ export default async function SchemesPage() {
               : "No classes are assigned to you yet. Ask your school admin to assign your classes in ResultPeak."}
           </EmptyState>
         </div>
-      ) : isAwaitingAllocation(session) ? (
+      ) : authorsNothing(session, unmatched, classes.map((c) => c.id)) ? (
         /*
           Enforcement on, no allocation. Without this the `{}` teachable map
           would offer every school subject for every class below, and the
@@ -114,14 +123,33 @@ export default async function SchemesPage() {
 
           <div className="mt-6 space-y-5">
             {classes.map((klass) => {
-              const offered = subjectsForClass(teachable, subjects, klass.id);
-              if (offered.length === 0) return null;
+              const gap = unmatchedState(unmatched, klass.id);
+              // A class with no subject set lists only what is already uploaded
+              // there, under a note saying why: never every subject as missing,
+              // and never silently dropped from the page.
+              const offered = gap
+                ? subjects.filter((s) => byPair.has(`${klass.id}\t${s.id}`))
+                : subjectsForClass(teachable, subjects, klass.id);
+              if (offered.length === 0 && !gap) return null;
               return (
                 <Card key={klass.id}>
                   <CardHeader
                     title={klass.name}
-                    hint={`${offered.length} subject${offered.length === 1 ? "" : "s"}`}
+                    hint={
+                      gap
+                        ? "Subjects not set"
+                        : `${offered.length} subject${offered.length === 1 ? "" : "s"}`
+                    }
                   />
+                  {gap && (
+                    <div className="px-4 pb-1 pt-4">
+                      <UnmatchedClassNote
+                        classLabel={klass.name}
+                        state={gap}
+                        noun="schemes of work"
+                      />
+                    </div>
+                  )}
                   <ul className="divide-y divide-line">
                     {offered.map((subject) => {
                       const list = byPair.get(`${klass.id}\t${subject.id}`) ?? [];

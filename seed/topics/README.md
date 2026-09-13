@@ -17,3 +17,6 @@ who knows the syllabus.
 ## File naming
 
 `<level>-<subjectId>.json` e.g. `SS2-biology.json`, `P4-basic-science.json`
+
+`<level>` is one of `PN` (pre-nursery), `N1`–`N3`, `P1`–`P6`, `JSS1`–`JSS3`,
+`SS1`–`SS3`. The list is `LEVEL_LABELS` in `src/lib/class-level.ts`.

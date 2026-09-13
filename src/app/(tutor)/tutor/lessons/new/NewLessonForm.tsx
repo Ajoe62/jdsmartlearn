@@ -6,7 +6,13 @@ import Callout from "@/components/ui/Callout";
 import { Card, CardHeader } from "@/components/ui/Card";
 import Field, { CONTROL } from "@/components/ui/Field";
 import FileUploadField, { type UploadedFile } from "@/components/tutor/FileUploadField";
-import { classesForSubject, subjectsForClass } from "@/lib/auth/subject-access";
+import {
+  classesForSubject,
+  subjectsForClass,
+  unmatchedState,
+  type UnmatchedClasses,
+} from "@/lib/auth/subject-access";
+import UnmatchedClassNote from "@/components/tutor/UnmatchedClassNote";
 import { newLocalId, queueOp } from "@/lib/offline/tutor-outbox";
 import {
   MAX_TUTOR_FILE_BYTES,
@@ -14,6 +20,7 @@ import {
   formatLimit,
 } from "@/lib/storage/file-types";
 import { readApiError } from "@/lib/upload-client";
+import { CLASS_LEVELS, LEVEL_LABELS } from "@/lib/class-level";
 import type { ClassLevel } from "@/types";
 
 type ClassOpt = { id: string; name: string; level?: ClassLevel };
@@ -22,17 +29,12 @@ type TopicOpt = { id: string; subjectId: string; level: ClassLevel; title: strin
 
 const MIN_CHARS = 200;
 
-const ALL_LEVELS: ClassLevel[] = [
-  "P1", "P2", "P3", "P4", "P5", "P6",
-  "JSS1", "JSS2", "JSS3",
-  "SS1", "SS2", "SS3",
-];
-
 export default function NewLessonForm({
   classes,
   subjects,
   topics,
   teachable,
+  unmatched,
   filesAvailable,
 }: {
   classes: ClassOpt[];
@@ -40,6 +42,8 @@ export default function NewLessonForm({
   topics: TopicOpt[];
   /** subjectId -> classIds. `{}` means no restriction - see subject-access. */
   teachable: Record<string, string[]>;
+  /** Held classes with no subject set for this tutor - see pickerAllocation(). */
+  unmatched: UnmatchedClasses;
   /** False when R2 is not configured: the lesson must be pasted. */
   filesAvailable: boolean;
 }) {
@@ -167,13 +171,22 @@ export default function NewLessonForm({
     if (topic && !title.trim()) setTitle(topic.title);
   }
 
+  /**
+   * The chosen class has no subject set for this tutor in ResultPeak: "open"
+   * lists every subject, "blocked" none. Either way the form says why, so the
+   * subject box is never silently empty. See pickerAllocation().
+   */
+  const classGap = unmatchedState(unmatched, classId);
+
   const contentReady = mode === "paste" ? text.trim().length >= MIN_CHARS : !!upload;
   const canSubmit = !!classId && !!subjectId && !!topicId && !!title.trim() && contentReady;
 
   // Tell the tutor exactly what's missing instead of a silently disabled button.
   const missing: string[] = [];
   if (!classId) missing.push("choose a class");
-  if (!subjectId) missing.push("choose a subject");
+  if (!subjectId) {
+    missing.push(classGap === "blocked" ? "choose a class you have subjects in" : "choose a subject");
+  }
   if (!topicId) missing.push("choose a topic");
   if (!title.trim()) missing.push("add a title");
   if (!contentReady) {
@@ -314,9 +327,12 @@ export default function NewLessonForm({
                   setClassId("");
                 }
               }}
+              disabled={classGap === "blocked"}
               className={CONTROL}
             >
-              <option value="">Choose a subject</option>
+              <option value="">
+                {classGap === "blocked" ? "No subjects for this class" : "Choose a subject"}
+              </option>
               {subjectOptions.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -324,6 +340,10 @@ export default function NewLessonForm({
               ))}
             </select>
           </Field>
+
+          {classGap && selectedClass && (
+            <UnmatchedClassNote classLabel={selectedClass.name} state={classGap} noun="lessons" />
+          )}
 
           <Field label="Topic" htmlFor="lesson-topic">
             <select
@@ -401,9 +421,9 @@ export default function NewLessonForm({
                         className={CONTROL}
                       >
                         <option value="">Choose a level</option>
-                        {ALL_LEVELS.map((l) => (
+                        {CLASS_LEVELS.map((l) => (
                           <option key={l} value={l}>
-                            {l}
+                            {LEVEL_LABELS[l]}
                           </option>
                         ))}
                       </select>

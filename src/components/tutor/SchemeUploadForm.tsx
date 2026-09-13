@@ -6,7 +6,12 @@ import { Button } from "@/components/ui/Button";
 import Callout from "@/components/ui/Callout";
 import Field, { CONTROL } from "@/components/ui/Field";
 import FileUploadField, { type UploadedFile } from "@/components/tutor/FileUploadField";
-import { subjectsForClass } from "@/lib/auth/subject-access";
+import {
+  subjectsForClass,
+  unmatchedState,
+  type UnmatchedClasses,
+} from "@/lib/auth/subject-access";
+import UnmatchedClassNote from "@/components/tutor/UnmatchedClassNote";
 import {
   MAX_TUTOR_FILE_BYTES,
   TUTOR_UPLOAD_LABEL,
@@ -37,12 +42,15 @@ export default function SchemeUploadForm({
   classes,
   subjects,
   teachable,
+  unmatched,
   filesAvailable,
 }: {
   classes: { id: string; name: string }[];
   subjects: { id: string; name: string }[];
   /** subjectId -> classIds. `{}` means no restriction - see subject-access. */
   teachable: Record<string, string[]>;
+  /** Held classes with no subject set for this tutor - see pickerAllocation(). */
+  unmatched: UnmatchedClasses;
   /** False when R2 is not configured: paste or type the weeks instead. */
   filesAvailable: boolean;
 }) {
@@ -61,9 +69,12 @@ export default function SchemeUploadForm({
 
   // Narrows with the class, so a tutor cannot be offered a pair they do not
   // teach. The same helper the lesson form uses.
+  // A class with no subject set for this tutor: "open" lists every subject,
+  // "blocked" none, and the form says why either way. See pickerAllocation().
+  const classGap = unmatchedState(unmatched, classId);
   const available = useMemo(
-    () => subjectsForClass(teachable, subjects, classId),
-    [teachable, subjects, classId]
+    () => (classGap === "blocked" ? [] : subjectsForClass(teachable, subjects, classId)),
+    [teachable, subjects, classId, classGap]
   );
   const [subjectId, setSubjectId] = useState(available[0]?.id ?? "");
 
@@ -136,7 +147,9 @@ export default function SchemeUploadForm({
           className={CONTROL}
           value={effectiveSubject}
           onChange={(e) => setSubjectId(e.target.value)}
+          disabled={available.length === 0}
         >
+          {available.length === 0 && <option value="">No subjects for this class</option>}
           {available.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -144,6 +157,14 @@ export default function SchemeUploadForm({
           ))}
         </select>
       </Field>
+
+      {classGap && (
+        <UnmatchedClassNote
+          classLabel={classes.find((c) => c.id === classId)?.name ?? "this class"}
+          state={classGap}
+          noun="schemes of work"
+        />
+      )}
 
       <Field label="Title" htmlFor="scheme-title">
         <input

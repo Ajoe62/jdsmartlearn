@@ -4,10 +4,10 @@ import { getTutorSession } from "@/lib/auth/tutor";
 import {
   getClassesByIds,
   getSubjects,
-  getTeachableMap,
+  getPickerAllocation,
   listClassesForSchool,
 } from "@/lib/db/resultpeak";
-import { isAwaitingAllocation } from "@/lib/auth/subject-access";
+import { authorsNothing } from "@/lib/auth/subject-access";
 import { listLessonsForSchool, listLessonsForTutor } from "@/lib/db/lessons";
 import { storageConfigured } from "@/lib/storage/provider";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
@@ -50,7 +50,7 @@ export default async function NewAssignmentPage() {
    * The form omitting a pair it should not offer is a convenience, not a
    * control: POST /api/tutor/assignments re-checks it.
    */
-  const teachable = await getTeachableMap(
+  const { teachable, unmatched } = await getPickerAllocation(
     session.schoolId,
     session,
     classes.map((c) => c.id)
@@ -98,7 +98,7 @@ export default async function NewAssignmentPage() {
           No classes are assigned to you yet. Ask your school admin to assign your
           classes in ResultPeak.
         </p>
-      ) : isAwaitingAllocation(session) ? (
+      ) : authorsNothing(session, unmatched, classes.map((c) => c.id)) ? (
         /* Enforcement on, no allocation. After the class check, so a tutor with
            neither is told about the more basic problem first. */
         <div className="mt-6">
@@ -109,6 +109,7 @@ export default async function NewAssignmentPage() {
           classes={classes.map((c) => ({ id: c.id, name: c.name }))}
           subjects={subjects}
           teachable={teachable}
+          unmatched={unmatched}
           lessons={linkable}
           defaultTerm={settings.term}
           defaultSession={settings.session}

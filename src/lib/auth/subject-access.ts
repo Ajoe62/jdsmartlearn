@@ -152,26 +152,118 @@ export function teachesSubject(
  *
  * The one case it cannot express is enforcement + no allocation, where `{}`
  * would offer everything to someone who may author nothing. Callers test
- * isAwaitingAllocation() BEFORE reaching for this map, and render an empty state
+ * authorsNothing() BEFORE reaching for this map, and render an empty state
  * instead of a picker.
+ *
+ * A thin wrapper over pickerAllocation(), which pages should call instead: it
+ * also reports the held classes the allocation gives no subject in.
  */
 export function teachableMap(
   allocation: SubjectAllocation,
   schoolSubjectIds: string[],
   heldClassIds: string[]
 ): Record<string, string[]> {
-  if (allocation.isAdmin || isUnallocated(allocation)) return {};
+  return pickerAllocation(allocation, schoolSubjectIds, heldClassIds).teachable;
+}
+
+/**
+ * Held classes the tutor's allocation names no usable subject in.
+ *
+ * `enforced` travels with the list because it decides what such a class offers:
+ * every subject while the school has enforcement off (the routes accept any
+ * subject there, so the picker must too), and nothing once it is on.
+ */
+export interface UnmatchedClasses {
+  classIds: string[];
+  enforced: boolean;
+}
+
+export interface PickerAllocation {
+  /** subjectId -> classIds. `{}` means no restriction. */
+  teachable: Record<string, string[]>;
+  unmatched: UnmatchedClasses;
+}
+
+/**
+ * The map a picker should offer, plus the classes it had to make a decision
+ * about.
+ *
+ * THE GAP THIS CLOSES. ResultPeak's contract says `assignedClasses` is the
+ * derived union of the classes in `assignments`, so a held class always has at
+ * least one subject. Production broke that on 2026-09-12: a tutor at Mt Cedar
+ * held Nursery 1 with no pair naming it (docs/resultpeak-defects.md, defect 6).
+ * Narrowing alone then offered NO subject for that class - an empty picker, a
+ * refusal nobody switched on, while the routes would have accepted any subject.
+ *
+ * So a held class with no usable subject - never allocated there, or allocated
+ * only subjects since removed from the school - is:
+ *
+ *   enforcement off -> offered every school subject, and reported as unmatched
+ *                      so the form can say why the list is not narrowed
+ *   enforcement on  -> offered nothing, and reported as unmatched so the form
+ *                      names the fix instead of rendering an empty select
+ *
+ * Both are what teachesSubjectInClass() already answers for that class. The
+ * invariant the tests hold: a picker never offers a pair a route refuses, and
+ * never offers nothing in a class where a route would accept something.
+ */
+export function pickerAllocation(
+  allocation: SubjectAllocation,
+  schoolSubjectIds: string[],
+  heldClassIds: string[]
+): PickerAllocation {
+  const enforced = allocation.subjectAllocationEnforced;
+  if (allocation.isAdmin || isUnallocated(allocation)) {
+    return { teachable: {}, unmatched: { classIds: [], enforced } };
+  }
 
   const subjects = new Set(schoolSubjectIds);
-  const classes = new Set(heldClassIds);
+  const held = [...new Set(heldClassIds)];
   const map: Record<string, string[]> = {};
 
   for (const [subjectId, classIds] of Object.entries(allocation.subjectClasses)) {
     if (!subjects.has(subjectId)) continue; // subject removed in ResultPeak
-    const usable = classIds.filter((id) => classes.has(id));
+    const usable = (classIds ?? []).filter((id) => held.includes(id));
     if (usable.length > 0) map[subjectId] = usable;
   }
-  return map;
+
+  const matched = new Set(Object.values(map).flat());
+  const unmatchedIds = held.filter((id) => !matched.has(id));
+
+  if (!enforced && unmatchedIds.length > 0) {
+    for (const subjectId of subjects) {
+      map[subjectId] = [...(map[subjectId] ?? []), ...unmatchedIds];
+    }
+  }
+
+  return { teachable: map, unmatched: { classIds: unmatchedIds, enforced } };
+}
+
+/**
+ * The tutor can author nothing in any class they hold: render an empty state
+ * that names the fix, never a form.
+ *
+ * isAwaitingAllocation() covers a tutor with no allocation at all. This adds
+ * the case it cannot see - allocated, enforced, but no pair naming any class
+ * they still hold - which `{}` would otherwise present as "offer everything".
+ */
+export function authorsNothing(
+  allocation: SubjectAllocation,
+  unmatched: UnmatchedClasses,
+  heldClassIds: string[]
+): boolean {
+  if (isAwaitingAllocation(allocation)) return true;
+  if (allocation.isAdmin || !unmatched.enforced || heldClassIds.length === 0) return false;
+  return heldClassIds.every((id) => unmatched.classIds.includes(id));
+}
+
+/** A class the form must explain: "open" offers every subject, "blocked" offers none. */
+export function unmatchedState(
+  unmatched: UnmatchedClasses,
+  classId: string
+): "open" | "blocked" | null {
+  if (!classId || !unmatched.classIds.includes(classId)) return null;
+  return unmatched.enforced ? "blocked" : "open";
 }
 
 /**

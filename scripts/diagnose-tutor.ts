@@ -170,6 +170,16 @@ async function main() {
         bad(`pairs naming a class not in assignedClasses: ${JSON.stringify(orphans)}`);
         info("assertClassAccess runs first, so these are unusable. Fix in ResultPeak.");
       }
+      // The reverse, and the one a teacher notices: a class they hold with no
+      // subject in it. The subject box for that class lists every subject while
+      // enforcement is off, and nothing once it is on. See pickerAllocation().
+      const allocatedClasses = new Set(Object.values(subjectClasses).flat());
+      const bare = assigned.filter((id) => !allocatedClasses.has(id));
+      if (bare.length > 0) {
+        bad(`holds class(es) with no subject allocated: ${JSON.stringify(bare)}`);
+        info("Allocate this tutor's subjects for them in ResultPeak, or remove the class.");
+        info("Run npm run diagnose:allocations for the whole school.");
+      }
     }
     const classTeacherOf = data.classTeacherOf;
     if (Array.isArray(classTeacherOf) && classTeacherOf.length > 0) {

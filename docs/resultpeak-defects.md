@@ -237,3 +237,49 @@ what is in the bucket rather than what the builder does.
 
 `npm run report:purge -- <schoolId>` reports all of the above per school,
 read-only. Against CAPSTONE ACADEMY on 2026-09-03: 97 rows, 2 files, 18 reads.
+
+---
+
+## 6. `assignedClasses` keeps a class after its last subject pair is removed
+
+**Severity: medium. A teacher opens a class and the subject box is empty.**
+
+Found from this side on 2026-09-13, when a tutor at Mt Cedar British
+International School (`dV6zL3AEydAFJc3D3GrO`) could not pick a subject for
+Nursery 1 when adding a lesson or a scheme of work.
+
+The contract, in `docs/resultpeak-subject-allocation.md`: `assignedClasses` is
+the **derived union of every class in `assignments`**. Production breaks it. Two
+tutor profiles at that school hold a class that no pair in `assignments` names.
+`subjectClasses` agrees with `assignments` in both, so the extra entry is in
+`assignedClasses` alone:
+
+| Tutor uid | Class held with no subject | `assignmentsUpdatedAt` |
+|---|---|---|
+| `3BV6nNf9rvVpA2olgI8D0farRjq1` | Nursery 1 (`wlCep9iEmYL9aZ96slVm`) | 2026-09-12T19:02:31Z |
+| `meKwqrDX9eUt8qltyNkaC8ZszVc2` | SSS 1 (`ohWRsEorAi5GY0Fm7NZR`) | 2026-09-10T10:46:29Z |
+
+Neither holds the class through `classTeacherOf` (both are `[]`). The likely
+cause is an allocation save that merges the new classes into the stored
+`assignedClasses` instead of recomputing it from `assignments`, so removing a
+class's last pair never removes the class. Not confirmed from this side.
+
+### The consequence
+
+- **JDSmartLearn.** A picker narrowed to the tutor's pairs offered no subject for
+  that class. The school has enforcement off, so every route would have accepted
+  any subject; the empty box was a refusal nobody switched on.
+- **ResultPeak.** The tutor keeps class-level access to a class the school has
+  taken every subject away from. Under `subjectAllocation: true` that is a class
+  they can see and author nothing in.
+
+### Worked around on this side, 2026-09-13
+
+`pickerAllocation()` in `src/lib/auth/subject-access.ts` treats a held class with
+no usable pair as **unmatched**: every subject while enforcement is off (what the
+routes accept), with a note saying why, and nothing, with a note naming the fix,
+once it is on. That is a workaround for bad data, not the fix. The fix is
+`docs/resultpeak-assigned-classes-prompt.md`.
+
+`npm run diagnose:allocations -- [schoolId]` lists every case, read-only. Across
+all four schools on 2026-09-13: the two rows above, nothing else.

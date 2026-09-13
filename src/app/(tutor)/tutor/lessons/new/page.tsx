@@ -4,10 +4,10 @@ import { getTutorSession } from "@/lib/auth/tutor";
 import {
   getClassesByIds,
   getSubjects,
-  getTeachableMap,
+  getPickerAllocation,
   listClassesForSchool,
 } from "@/lib/db/resultpeak";
-import { isAwaitingAllocation } from "@/lib/auth/subject-access";
+import { authorsNothing } from "@/lib/auth/subject-access";
 import { listTopics } from "@/lib/db/topics";
 import { classLevel } from "@/lib/class-level";
 import { storageConfigured } from "@/lib/storage/provider";
@@ -38,7 +38,7 @@ export default async function NewLessonPage() {
    * Filtering here is a convenience only. POST /api/lessons re-checks the pair
    * server-side against the topic's own subject.
    */
-  const teachable = await getTeachableMap(
+  const { teachable, unmatched } = await getPickerAllocation(
     session.schoolId,
     session,
     classes.map((c) => c.id)
@@ -56,7 +56,7 @@ export default async function NewLessonPage() {
           No classes are assigned to you yet. Ask your school admin to assign your
           classes in ResultPeak.
         </p>
-      ) : isAwaitingAllocation(session) ? (
+      ) : authorsNothing(session, unmatched, classes.map((c) => c.id)) ? (
         /* Enforcement on, no allocation. Checked AFTER classes so a tutor with
            neither problem is told about the more basic one first. */
         <div className="mt-6">
@@ -67,6 +67,7 @@ export default async function NewLessonPage() {
           classes={classes.map((c) => ({ id: c.id, name: c.name, level: classLevel(c) }))}
           subjects={subjects}
           teachable={teachable}
+          unmatched={unmatched}
           topics={topics.map((t) => ({
             id: t.id,
             subjectId: t.subjectId,

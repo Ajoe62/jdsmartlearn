@@ -1,3 +1,4 @@
+import { LEVEL_LABELS, isEarlyYears } from "@/lib/class-level";
 import type { ClassLevel } from "@/types";
 
 /**
@@ -29,13 +30,36 @@ const BANDS: Record<string, { words: string; count: number; guidance: string }> 
     guidance:
       "Ages 15-18. Some questions should require explanation, not just recall. WAEC-style phrasing.",
   },
+  /**
+   * Pre-nursery and nursery, added 2026-09-13. The strictest band, not a looser
+   * one: these children cannot read, so the material is written to be read
+   * aloud and the questions to be answered out loud. Four questions is the
+   * schema's minimum.
+   */
+  early_years: {
+    words: "40-80 words",
+    count: 4,
+    guidance:
+      "For children aged 2-5 who cannot read yet: a teacher or parent reads it aloud. " +
+      "Sentences of 3 to 6 everyday words. Talk only about things a child can see, touch, hear or do. " +
+      "No abstract ideas and no lists of facts. " +
+      "Questions are asked aloud and answered by saying one word, pointing, counting or showing.",
+  },
 };
 
-function bandFor(level: ClassLevel) {
+export function bandFor(level: ClassLevel) {
+  // Before the primary test: "PN" also starts with "P".
+  if (isEarlyYears(level)) return BANDS.early_years;
   if (["P1", "P2", "P3"].includes(level)) return BANDS.lower_primary;
   if (["P4", "P5", "P6"].includes(level)) return BANDS.upper_primary;
   if (level.startsWith("JSS")) return BANDS.junior;
   return BANDS.senior;
+}
+
+function curriculumFor(level: ClassLevel) {
+  if (isEarlyYears(level)) return "Nigerian Early Childhood Care and Education (ECCE)";
+  if (level.startsWith("P")) return "NERDC Basic Education";
+  return "WAEC/NECO aligned";
 }
 
 export interface PromptInput {
@@ -52,10 +76,10 @@ export interface PromptInput {
  */
 export function buildPrompt({ lessonText, subjectName, topicTitle, level }: PromptInput) {
   const band = bandFor(level);
-  const curriculum = level.startsWith("P") ? "NERDC Basic Education" : "WAEC/NECO aligned";
+  const curriculum = curriculumFor(level);
 
   const system = [
-    `You create study materials for Nigerian school students at level ${level}.`,
+    `You create study materials for Nigerian school students at level ${LEVEL_LABELS[level]}.`,
     `Subject: ${subjectName}. Topic: ${topicTitle}. Curriculum: ${curriculum}.`,
     `Return ONLY JSON matching the provided schema.`,
     `Summary: ${band.words}. ${band.guidance}`,

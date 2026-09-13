@@ -5,11 +5,11 @@ import PageHeader from "@/components/ui/PageHeader";
 import AwaitingAllocation from "@/components/tutor/AwaitingAllocation";
 import SchemeUploadForm from "@/components/tutor/SchemeUploadForm";
 import { getTutorSession } from "@/lib/auth/tutor";
-import { isAwaitingAllocation } from "@/lib/auth/subject-access";
+import { authorsNothing } from "@/lib/auth/subject-access";
 import {
   getClassesByIds,
   getSubjects,
-  getTeachableMap,
+  getPickerAllocation,
   listClassesForSchool,
 } from "@/lib/db/resultpeak";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
@@ -34,7 +34,7 @@ export default async function NewSchemePage() {
     getCurrentTermSession(session.schoolId),
   ]);
 
-  const teachable = await getTeachableMap(
+  const { teachable, unmatched } = await getPickerAllocation(
     session.schoolId,
     session,
     classes.map((c) => c.id)
@@ -69,7 +69,7 @@ export default async function NewSchemePage() {
             classes in ResultPeak, and they&apos;ll appear here.
           </EmptyState>
         </div>
-      ) : isAwaitingAllocation(session) ? (
+      ) : authorsNothing(session, unmatched, classes.map((c) => c.id)) ? (
         /* Enforcement on, no allocation. After the class check, so a tutor with
            neither is told about the more basic problem first. */
         <div className="mt-6">
@@ -80,6 +80,7 @@ export default async function NewSchemePage() {
           classes={classes.map((c) => ({ id: c.id, name: c.name }))}
           subjects={subjects}
           teachable={teachable}
+          unmatched={unmatched}
           filesAvailable={storageConfigured()}
         />
       )}

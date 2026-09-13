@@ -1,7 +1,12 @@
 // Shared domain types.
 // NOTE: types prefixed ResultPeak* describe collections this app READS ONLY.
 
+/**
+ * Youngest first. Name every new level in LEVEL_LABELS (lib/class-level), which
+ * is the one list everything else reads - the build fails until you do.
+ */
 export type ClassLevel =
+  | "PN" | "N1" | "N2" | "N3"
   | "P1" | "P2" | "P3" | "P4" | "P5" | "P6"
   | "JSS1" | "JSS2" | "JSS3"
   | "SS1" | "SS2" | "SS3";

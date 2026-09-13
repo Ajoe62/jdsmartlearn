@@ -18,6 +18,7 @@ process.loadEnvFile(".env.local");
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { JD } from "../src/lib/db/collections";
+import { CLASS_LEVELS, isClassLevel } from "../src/lib/class-level";
 
 const schoolId = process.argv[2];
 if (!schoolId) {
@@ -45,10 +46,25 @@ async function main() {
   const adminDb = getFirestore();
 
   const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+
+  // Check every pack before writing any, so a mistyped level in one file does
+  // not leave the school half-seeded with topics no class can ever match.
+  const packs = files.map((file) => ({
+    file,
+    pack: JSON.parse(readFileSync(join(dir, file), "utf8")),
+  }));
+  for (const { file, pack } of packs) {
+    if (!isClassLevel(pack.level)) {
+      console.error(
+        `${file}: "${pack.level}" is not a class level. Use one of ${CLASS_LEVELS.join(", ")}.`
+      );
+      process.exit(1);
+    }
+  }
+
   let count = 0;
 
-  for (const file of files) {
-    const pack = JSON.parse(readFileSync(join(dir, file), "utf8"));
+  for (const { file, pack } of packs) {
     const batch = adminDb.batch();
 
     for (const topic of pack.topics) {

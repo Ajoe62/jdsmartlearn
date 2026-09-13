@@ -137,13 +137,26 @@ import {
   missingConfigMessage,
 } from "../src/lib/firebase/env";
 import {
+  CLASS_LEVELS,
+  LEVEL_LABELS,
+  classLevel,
+  isClassLevel,
+  isEarlyYears,
+  levelFromClassName,
+} from "../src/lib/class-level";
+import { bandFor, buildPrompt } from "../src/lib/ai/prompt";
+import { generationSchema } from "../src/lib/ai/schema";
+import {
+  authorsNothing,
   isAwaitingAllocation,
   isUnallocated,
+  pickerAllocation,
   teachesSubject,
   teachesSubjectInClass,
   teachableMap,
   subjectsForClass,
   classesForSubject,
+  unmatchedState,
   type SubjectAllocation,
 } from "../src/lib/auth/subject-access";
 import {
@@ -2526,6 +2539,120 @@ test("the pickers narrow in both directions", () => {
   assert.deepEqual(classesForSubject(map, classes, "english"), []);
 });
 
+/**
+ * A class the tutor holds with no subject allocated in it.
+ *
+ * Production, Mt Cedar, 2026-09-12: ResultPeak left Nursery 1 in a tutor's
+ * assignedClasses with no pair naming it (docs/resultpeak-defects.md, defect 6).
+ * Narrowing alone offered no subject for that class, so the lesson, assignment
+ * and scheme forms had a subject box that did nothing - while every route would
+ * have accepted any subject, because the school has enforcement off.
+ */
+const HELD = ["jss1a", "jss2a", "ss1a", "nursery1"];
+const SCHOOL_SUBJECTS = ["mathematics", "further_mathematics", "literacy"];
+const asOptions = (ids: string[]) => ids.map((id) => ({ id }));
+/** Allocated only in a subject the school has since removed. */
+const STALE = { isAdmin: false, assignedSubjects: ["gone"], subjectClasses: { gone: ["jss1a"] } };
+
+test("a held class with no subject is never an empty picker while enforcement is off", () => {
+  const { teachable, unmatched } = pickerAllocation(ALLOCATED_OFF, SCHOOL_SUBJECTS, HELD);
+  assert.deepEqual(unmatched, { classIds: ["nursery1"], enforced: false });
+  assert.equal(unmatchedState(unmatched, "nursery1"), "open");
+  assert.equal(unmatchedState(unmatched, "jss1a"), null);
+  assert.equal(unmatchedState(unmatched, ""), null);
+
+  assert.deepEqual(
+    subjectsForClass(teachable, asOptions(SCHOOL_SUBJECTS), "nursery1"),
+    asOptions(SCHOOL_SUBJECTS)
+  );
+  // The allocated classes still narrow: the fix widens only the gap.
+  assert.deepEqual(subjectsForClass(teachable, asOptions(SCHOOL_SUBJECTS), "jss1a"), [
+    { id: "mathematics" },
+  ]);
+  // Subject first, then class: the gap class is still on offer.
+  assert.ok(
+    classesForSubject(teachable, asOptions(HELD), "literacy").some((c) => c.id === "nursery1")
+  );
+  assert.equal(authorsNothing(ALLOCATED_OFF, unmatched, HELD), false);
+});
+
+test("under enforcement the same class offers nothing, and is reported so the form says why", () => {
+  const { teachable, unmatched } = pickerAllocation(ALLOCATED_ON, SCHOOL_SUBJECTS, HELD);
+  assert.deepEqual(unmatched, { classIds: ["nursery1"], enforced: true });
+  assert.equal(unmatchedState(unmatched, "nursery1"), "blocked");
+  assert.deepEqual(subjectsForClass(teachable, asOptions(SCHOOL_SUBJECTS), "nursery1"), []);
+  // The tutor still teaches the other classes, so the form renders.
+  assert.equal(authorsNothing(ALLOCATED_ON, unmatched, HELD), false);
+});
+
+test("allocated only in removed subjects: every class unmatched, and never `{}` read as everything", () => {
+  const offAlloc: SubjectAllocation = { ...STALE, subjectAllocationEnforced: false };
+  const off = pickerAllocation(offAlloc, SCHOOL_SUBJECTS, ["jss1a"]);
+  assert.deepEqual(off.unmatched.classIds, ["jss1a"]);
+  assert.deepEqual(
+    subjectsForClass(off.teachable, asOptions(SCHOOL_SUBJECTS), "jss1a"),
+    asOptions(SCHOOL_SUBJECTS)
+  );
+
+  // Under enforcement the map is `{}`, which every form reads as "offer
+  // everything" - so the page must render the empty state instead of a form.
+  const onAlloc: SubjectAllocation = { ...STALE, subjectAllocationEnforced: true };
+  const on = pickerAllocation(onAlloc, SCHOOL_SUBJECTS, ["jss1a"]);
+  assert.deepEqual(on.teachable, {});
+  assert.equal(authorsNothing(onAlloc, on.unmatched, ["jss1a"]), true);
+});
+
+test("admins and unallocated tutors have nothing unmatched", () => {
+  for (const base of [LEGACY, AWAITING, { ...ALLOCATED_ON, isAdmin: true }]) {
+    assert.deepEqual(pickerAllocation(base, SCHOOL_SUBJECTS, HELD).unmatched.classIds, []);
+  }
+  assert.equal(
+    authorsNothing(AWAITING, pickerAllocation(AWAITING, SCHOOL_SUBJECTS, HELD).unmatched, HELD),
+    true
+  );
+  assert.equal(
+    authorsNothing({ ...AWAITING, isAdmin: true }, { classIds: HELD, enforced: true }, HELD),
+    false
+  );
+});
+
+test("in every row, the picker agrees with the routes about every held class", () => {
+  // The invariant that would have caught Nursery 1, over the whole table rather
+  // than one case: no dead option (offered, then refused on submit), and no empty
+  // subject box for a class where a route would have accepted a subject.
+  const rows: [string, SubjectAllocation][] = [
+    ["legacy", LEGACY],
+    ["allocated, off", ALLOCATED_OFF],
+    ["allocated, on", ALLOCATED_ON],
+    ["awaiting", AWAITING],
+    ["admin", { ...ALLOCATED_ON, isAdmin: true }],
+    ["stale, off", { ...STALE, subjectAllocationEnforced: false }],
+    ["stale, on", { ...STALE, subjectAllocationEnforced: true }],
+  ];
+  for (const [label, allocation] of rows) {
+    const { teachable, unmatched } = pickerAllocation(allocation, SCHOOL_SUBJECTS, HELD);
+    const nothing = authorsNothing(allocation, unmatched, HELD);
+    for (const classId of HELD) {
+      const accepted = SCHOOL_SUBJECTS.filter((s) =>
+        teachesSubjectInClass(allocation, classId, s)
+      );
+      const offered =
+        nothing || unmatchedState(unmatched, classId) === "blocked"
+          ? []
+          : subjectsForClass(teachable, asOptions(SCHOOL_SUBJECTS), classId).map((s) => s.id);
+      for (const s of offered) {
+        assert.ok(accepted.includes(s), `${label}: ${classId} offers ${s}, which the route refuses`);
+      }
+      if (accepted.length > 0) {
+        assert.ok(
+          offered.length > 0,
+          `${label}: ${classId} offers no subject, but the route accepts ${accepted.join(", ")}`
+        );
+      }
+    }
+  }
+});
+
 /* ------------------------------------------------------------------ *
  * School branding (docs/SCHOOL-BRANDING.md)
  * ------------------------------------------------------------------ */
@@ -3862,5 +3989,87 @@ test("the upload routes build keys through the shared builders", () => {
       /const key = `/,
       `${rel} builds a storage key inline; use the builders in lib/storage/keys.ts`
     );
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * Class levels, pre-nursery to SS3 (lib/class-level, lib/ai/prompt)
+ *
+ * Pre-nursery and nursery were added on 2026-09-13. Before that three hand-kept
+ * level lists stopped at Primary 1, so every nursery class had no level: topics
+ * were not narrowed for it and a tutor's own topic had to be filed as Primary 1.
+ * ------------------------------------------------------------------ */
+
+test("every level is labelled, youngest first, in the one list validation reads", () => {
+  assert.deepEqual(CLASS_LEVELS.slice(0, 5), ["PN", "N1", "N2", "N3", "P1"]);
+  assert.equal(CLASS_LEVELS[CLASS_LEVELS.length - 1], "SS3");
+  assert.equal(CLASS_LEVELS.length, 16);
+  for (const level of CLASS_LEVELS) {
+    assert.ok(LEVEL_LABELS[level], `${level} has no label`);
+    assert.equal(isClassLevel(level), true);
+  }
+  assert.equal(isClassLevel("KG1"), false);
+  assert.equal(isClassLevel("toString"), false);
+  assert.equal(isClassLevel(undefined), false);
+});
+
+test("nursery and pre-nursery class names resolve to a level, and nothing is guessed", () => {
+  // Mt Cedar's real class and admissions names.
+  assert.equal(levelFromClassName("Toddlers/Pre-nursery"), "PN");
+  assert.equal(levelFromClassName("Pre-Nursery"), "PN");
+  assert.equal(levelFromClassName("Nursery 1"), "N1");
+  assert.equal(levelFromClassName("Nursery 2"), "N2");
+  assert.equal(levelFromClassName("Nursery 3"), "N3");
+  assert.equal(levelFromClassName("Nursery 3/Reception"), "N3");
+  assert.equal(levelFromClassName("Reception"), "N3");
+  assert.equal(levelFromClassName("Nursery 1A"), "N1");
+
+  // Ambiguous or unrelated names stay unresolved rather than filed wrongly.
+  assert.equal(levelFromClassName("KG 1"), undefined);
+  assert.equal(levelFromClassName("Nursery 12"), undefined);
+  assert.equal(levelFromClassName("Class"), undefined);
+
+  // The names that already worked still do.
+  assert.equal(levelFromClassName("Primary 2"), "P2");
+  assert.equal(levelFromClassName("JSS 3"), "JSS3");
+  assert.equal(levelFromClassName("SSS 1"), "SS1");
+  // A stored level still wins over the name.
+  assert.equal(classLevel({ level: "P1", name: "Nursery 1" }), "P1");
+});
+
+test("early years get the read-aloud band, and a primary code is never mistaken for one", () => {
+  for (const level of ["PN", "N1", "N2", "N3"] as const) {
+    assert.equal(isEarlyYears(level), true);
+    assert.equal(bandFor(level), bandFor("N1"));
+  }
+  // "PN" starts with "P": the trap bandFor's ordering exists to avoid.
+  assert.notEqual(bandFor("PN"), bandFor("P1"));
+  assert.equal(isEarlyYears("P1"), false);
+
+  const input = { lessonText: "Lesson.", subjectName: "Numeracy", topicTitle: "Counting to five" };
+  for (const level of ["PN", "N1"] as const) {
+    const { system } = buildPrompt({ ...input, level });
+    assert.match(system, new RegExp(LEVEL_LABELS[level]));
+    assert.match(system, /cannot read yet/);
+    assert.match(system, /Early Childhood/);
+    assert.doesNotMatch(system, /NERDC Basic Education/);
+    assert.match(system, /exactly 4 short-answer questions/);
+  }
+
+  // Primary is untouched.
+  const primary = buildPrompt({ ...input, level: "P1" }).system;
+  assert.match(primary, /NERDC Basic Education/);
+  assert.match(primary, /6-9 year old/);
+});
+
+test("every band asks for a question count the generation schema accepts", () => {
+  // Otherwise every generation for that level fails validation, retries, and
+  // spends the daily cap twice for nothing.
+  const questions = generationSchema.shape.questions._def;
+  const min = questions.minLength?.value ?? 0;
+  const max = questions.maxLength?.value ?? Infinity;
+  for (const level of CLASS_LEVELS) {
+    const { count } = bandFor(level);
+    assert.ok(count >= min && count <= max, `${level} asks for ${count}, schema allows ${min}-${max}`);
   }
 });

@@ -3,13 +3,11 @@ import { getTutorSession, assertSubjectTaught } from "@/lib/auth/tutor";
 import { createCustomTopic } from "@/lib/db/topics";
 import { writeAuditLog } from "@/lib/db/lessons";
 import { getSubjects } from "@/lib/db/resultpeak";
+import { CLASS_LEVELS } from "@/lib/class-level";
 import type { ClassLevel, Term } from "@/types";
 
-const LEVELS: readonly string[] = [
-  "P1", "P2", "P3", "P4", "P5", "P6",
-  "JSS1", "JSS2", "JSS3",
-  "SS1", "SS2", "SS3",
-];
+/** The one list, never a copy - see LEVEL_LABELS. */
+const LEVELS: readonly string[] = CLASS_LEVELS;
 
 /** Create a tutor's own topic when the seeded curriculum has no match. */
 export async function POST(req: Request) {
