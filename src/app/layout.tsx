@@ -36,6 +36,16 @@ export const metadata: Metadata = {
   },
   description: "Upload a lesson. Get a summary and practice questions back.",
   manifest: "/manifest.webmanifest",
+  /**
+   * The product icon, as the DEFAULT a school's crest replaces.
+   *
+   * Declared here in config rather than as `src/app/icon.svg`, and that move is
+   * the fix, not tidying. Next's file convention outranks every `icons` field a
+   * page or layout sets, so while the file sat in /app every school's own
+   * address showed the JDSmartLearn icon in the tab, whatever the shells asked
+   * for. A config default is one that a child segment can override.
+   */
+  icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }] },
   appleWebApp: { capable: true, title: "JDSmartLearn", statusBarStyle: "default" },
 };
 

@@ -54,10 +54,11 @@ export async function generateMetadata(): Promise<Metadata> {
      * a school on a domain it bought get the same icon: the address tier must
      * not change how a school looks.
      *
-     * Omitted rather than defaulted when there is no crest, so Next falls back
-     * to the product icon in /app rather than rendering a broken one.
+     * Spread in ONLY when there is a crest, never set to `undefined`: Next
+     * resolves any `icons` key that is present, so an undefined one wipes the
+     * product icon the root layout declares and the tab shows none at all.
      */
-    icons: brand.crestUrl ? { icon: brand.crestUrl } : undefined,
+    ...(brand.crestUrl ? { icons: { icon: brand.crestUrl, apple: brand.crestUrl } } : {}),
   };
 }
 

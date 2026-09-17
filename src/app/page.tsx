@@ -21,9 +21,15 @@ import { resultPeakSchoolUrl, resultPeakStaffUrl } from "@/lib/partner-links";
 
 export async function generateMetadata(): Promise<Metadata> {
   const brand = await pinnedBrand();
-  return brand
-    ? { title: brand.name, description: `Lessons and schoolwork for ${brand.name}.` }
-    : {};
+  if (!brand) return {};
+  return {
+    title: brand.name,
+    description: `Lessons and schoolwork for ${brand.name}.`,
+    // The school's crest in the tab on its own front door. Spread in only when
+    // there is one: an `icons` key present with no value would wipe the product
+    // default the root layout declares, leaving no icon at all.
+    ...(brand.crestUrl ? { icons: { icon: brand.crestUrl, apple: brand.crestUrl } } : {}),
+  };
 }
 
 async function pinnedBrand() {

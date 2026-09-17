@@ -71,7 +71,7 @@ lockup follows the same rule: SVG for the mark, live text for the words.
 |---|---|
 | `public/logo-mark.svg` | The mark, transparent. Header, and anywhere the wordmark is set beside it. |
 | `public/logo-icon.svg` | Full-bleed tile for PWA install and app icons. Maskable-safe. |
-| `src/app/icon.svg` | The tab icon, simplified for 16px. This file — not one in `public/` — is what Next serves, via the App Router icon convention. |
+| `public/icon.svg` | The product tab icon, simplified for 16px. The DEFAULT only: declared as `metadata.icons` in `src/app/layout.tsx`, and replaced by the school's crest on a school's front door and in both shells. Never move it back to `src/app/icon.svg` — Next's file convention outranks every page's `icons`, which showed this icon on every school's own address. |
 | `public/logo-mono.svg` | One colour via `currentColor`. Print, stamps, single-colour contexts. |
 
 ---

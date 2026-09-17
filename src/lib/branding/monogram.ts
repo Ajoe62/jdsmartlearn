@@ -54,6 +54,10 @@ const TYPE = new Set([
   "group",
   "centre",
   "center",
+  // The curriculum a school offers, not which school it is. Without these,
+  // "Mt. Cedar British International School" shortened to "Mt. Cedar British".
+  "british",
+  "american",
 ]);
 
 /** Letters and digits only - "St." and "Mary's" must not lose their initial. */
@@ -98,7 +102,7 @@ export function monogram(name: string): string {
 /**
  * A short name for a 360px header, when an admin has not set one.
  *
- * Drops a trailing generic word only - "CAPSTONE ACADEMY" reads fine as
+ * Drops trailing generic words only - "CAPSTONE ACADEMY" reads fine as
  * "Capstone" in a header 34 pixels tall. Never touches the middle of a name,
  * because "Good Shepherd School" shortened to "Good School" is a different
  * school.
@@ -114,17 +118,22 @@ export function shortenSchoolName(name: string): string {
   if (tokens.length < 2) return name;
 
   const bare = (token: string) => token.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+  const generic = (token: string) => TYPE.has(bare(token)) || NEVER.has(bare(token));
 
-  // Only TYPE words are trimmed. NEVER words are grammar, and "The Cedar" reads
-  // correctly while "Cedar" alone would be renaming the school.
+  // Trimmed from the END only, so a leading "The" stays: "The Cedar" reads
+  // correctly while "Cedar" alone would be renaming the school. Grammar comes
+  // off the end along with type words, because a name must never stop
+  // mid-phrase: trimming type words alone turned "Unifac Group of Schools" into
+  // "Unifac Group of", which a front door then printed as the school's name.
   const trimmed = [...tokens];
-  while (trimmed.length > 1 && TYPE.has(bare(trimmed[trimmed.length - 1]))) {
+  while (trimmed.length > 1 && generic(trimmed[trimmed.length - 1])) {
     trimmed.pop();
   }
 
-  // Trimming must not leave grammar standing alone: "The Academy" -> "The" is
-  // worse than the full name, and a header truncates anyway.
-  if (trimmed.every((t) => NEVER.has(bare(t)))) return name;
+  // Trimming must not leave only generic words standing: "The Academy" -> "The"
+  // and "International School" -> "International" are both worse than the full
+  // name, and a header truncates anyway.
+  if (trimmed.every(generic)) return name;
 
   return trimmed.length === tokens.length ? name : trimmed.join(" ");
 }

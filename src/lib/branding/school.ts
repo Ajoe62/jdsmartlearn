@@ -263,12 +263,19 @@ export function getSchoolBrand(schoolId: string): Promise<SchoolBrand | null> {
  * and proxied. Returning null makes the route 404 and the page falls back to the
  * monogram. Fetching an arbitrary URL from a Firestore document, server-side,
  * would be a request forgery primitive pointed at whatever an admin typed.
+ *
+ * THE CACHE HOLDS THE DATA URI STRING, AND THE DECODE HAPPENS AFTER IT. The
+ * data cache stores JSON, and a Buffer does not survive JSON: it comes back as
+ * `{ type, data }`, which serves as a zero-byte body with a Content-Length of
+ * "undefined". That was a 500 on every cache hit, and a school whose crest had
+ * just changed (UNIFAC, 2026-09-17) showed its monogram instead of its crest.
+ * Only strings cross the cache boundary here.
  */
-export function getSchoolCrest(schoolId: string): Promise<DecodedCrest | null> {
-  if (!schoolId) return Promise.resolve(null);
+export async function getSchoolCrest(schoolId: string): Promise<DecodedCrest | null> {
+  if (!schoolId) return null;
 
-  return unstable_cache(
-    async (): Promise<DecodedCrest | null> => {
+  const raw = await unstable_cache(
+    async (): Promise<string | null> => {
       const [schoolSnap, brandingSnap] = await Promise.all([
         adminDb.doc(`${RP.schools}/${schoolId}`).get(),
         adminDb.doc(`${RP.schoolBranding}/${schoolId}`).get(),
@@ -278,12 +285,13 @@ export function getSchoolCrest(schoolId: string): Promise<DecodedCrest | null> {
       if (!brandingSnap.exists) return null;
 
       const branding = (brandingSnap.data() ?? {}) as PublicBranding;
-      const raw = branding.faviconUrl?.trim() || branding.logoUrl?.trim() || "";
-      if (!isSafeCrestUrl(raw)) return null;
-
-      return decodeCrestDataUri(raw);
+      const uri = branding.faviconUrl?.trim() || branding.logoUrl?.trim() || "";
+      return isSafeCrestUrl(uri) ? uri : null;
     },
-    ["school-crest", schoolId],
+    // A new key, so no entry written in the old Buffer shape is ever read back.
+    ["school-crest-uri", schoolId],
     { revalidate: 900, tags: [schoolBrandTag(schoolId)] }
   )();
+
+  return raw ? decodeCrestDataUri(raw) : null;
 }
