@@ -18,6 +18,7 @@
     "diagnose:tutor": "tsx scripts/diagnose-tutor.ts",
     "diagnose:terms": "tsx scripts/diagnose-term-session.ts",
     "diagnose:allocations": "tsx scripts/diagnose-allocations.ts",
+    "refresh:class-names": "tsx scripts/refresh-class-names.ts",
     "report:purge": "tsx scripts/purge-report.ts",
     "list:tutors": "tsx scripts/list-tutors.ts",
     "list:students": "tsx scripts/list-students.ts"

@@ -4037,6 +4037,20 @@ test("nursery and pre-nursery class names resolve to a level, and nothing is gue
   assert.equal(classLevel({ level: "P1", name: "Nursery 1" }), "P1");
 });
 
+test("Year 1 to Year 12 resolve to primary, junior and senior levels", () => {
+  // Mt Cedar's class names from 2026-09-28.
+  assert.equal(levelFromClassName("Year 1"), "P1");
+  assert.equal(levelFromClassName("Year 6"), "P6");
+  assert.equal(levelFromClassName("Year 7"), "JSS1");
+  assert.equal(levelFromClassName("YEAR 7"), "JSS1");
+  assert.equal(levelFromClassName("Year 9"), "JSS3");
+  assert.equal(levelFromClassName("Year 10"), "SS1");
+  assert.equal(levelFromClassName("Year 12"), "SS3");
+  assert.equal(levelFromClassName("Year 13"), undefined);
+  // The level ResultPeak stores is what a renamed class is read by.
+  assert.equal(classLevel({ level: "JSS1", name: "Year 7" }), "JSS1");
+});
+
 test("early years get the read-aloud band, and a primary code is never mistaken for one", () => {
   for (const level of ["PN", "N1", "N2", "N3"] as const) {
     assert.equal(isEarlyYears(level), true);

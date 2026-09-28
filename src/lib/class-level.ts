@@ -11,6 +11,10 @@ import type { ClassLevel } from "@/types";
  *
  * ResultPeak's `cadre` field does not help here: it is "primary" on nursery and
  * pre-nursery classes too, so the name is the only signal that tells them apart.
+ *
+ * ResultPeak writes that `level` since 2026-09-28 (its src/lib/classLevel.js),
+ * in exactly these codes, so a school that renames "JSS 1" to "Year 7" keeps
+ * the class's level here.
  */
 
 /**
@@ -70,6 +74,14 @@ const ALIASES: Record<string, ClassLevel> = {
   BASIC7: "JSS1", BASIC8: "JSS2", BASIC9: "JSS3",
   JS1: "JSS1", JS2: "JSS2", JS3: "JSS3",
   SSS1: "SS1", SSS2: "SS2", SSS3: "SS3",
+  // British-style numbering, which Mt Cedar moved to on 2026-09-28: Year 1 is
+  // Primary 1, Year 7 is JSS 1 and Year 10 is SS 1. A backup only: ResultPeak
+  // now stores `level` on every class it creates, and a stored level wins over
+  // the name. Kept in step with guessLevel() in ResultPeak's src/lib/classLevel.js.
+  YEAR1: "P1", YEAR2: "P2", YEAR3: "P3",
+  YEAR4: "P4", YEAR5: "P5", YEAR6: "P6",
+  YEAR7: "JSS1", YEAR8: "JSS2", YEAR9: "JSS3",
+  YEAR10: "SS1", YEAR11: "SS2", YEAR12: "SS3",
 };
 
 /** Best-effort level from a free-text class name, e.g. "JSS 3" -> "JSS3". */
