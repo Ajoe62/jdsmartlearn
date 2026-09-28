@@ -8,7 +8,13 @@ import { toNoticeItem, visibleToStudent } from "@/lib/announcements/notices";
 import Announcements from "@/components/student/Announcements";
 import DashboardView from "@/components/student/DashboardView";
 import SubjectShelfView from "@/components/student/SubjectShelfView";
-import { resultPeakStudentResultsUrl, resultPeakUrl } from "@/lib/partner-links";
+import StudentPhotoCard from "@/components/student/StudentPhotoCard";
+import {
+  resultPeakStudentPhotoUrl,
+  resultPeakStudentResultsUrl,
+  resultPeakUrl,
+} from "@/lib/partner-links";
+import { studentPhotoUrl } from "@/lib/photos/url";
 
 /**
  * Student portal - read only. Server-rendered on the first visit (a cheap phone
@@ -63,6 +69,16 @@ export default async function StudentHome() {
   return (
     <>
       <DashboardView
+        photo={
+          <StudentPhotoCard
+            initialPhotoUrl={
+              session.photoVersion
+                ? studentPhotoUrl(session.studentId, session.photoVersion)
+                : null
+            }
+            changeUrl={resultPeakStudentPhotoUrl(own)}
+          />
+        }
         announcements={<Announcements initial={notices} initialReadState={readState} />}
         shelf={
           <SubjectShelfView

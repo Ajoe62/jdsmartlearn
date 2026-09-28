@@ -7,6 +7,7 @@ import LessonReaderView from "@/components/student/LessonReaderView";
 import SchemeReaderView from "@/components/student/SchemeReaderView";
 import SubjectDetailView from "@/components/student/SubjectDetailView";
 import SubjectShelfView from "@/components/student/SubjectShelfView";
+import StudentPhotoCard from "@/components/student/StudentPhotoCard";
 import { EMPTY_READ_STATE } from "@/lib/announcements/notices";
 import type { ShelfTotals } from "@/lib/shelf/build";
 
@@ -109,6 +110,9 @@ export default function OfflineShell() {
    */
   return (
     <DashboardView
+      // No photo in the shared HTML: the card reads this child's address from
+      // the device store on mount, like every other slot here.
+      photo={<StudentPhotoCard />}
       announcements={<Announcements initial={[]} initialReadState={EMPTY_READ_STATE} />}
       shelf={
         <SubjectShelfView

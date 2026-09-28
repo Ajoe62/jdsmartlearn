@@ -209,6 +209,10 @@ export const PURGED_BY_RESULTPEAK: readonly { collection: string; note: string }
     collection: "studentPhotoSubmissions",
     note: "passport photos awaiting approval; ResultPeak's, same cascade stage",
   },
+  {
+    collection: "studentPhotoState",
+    note: "photo upload counts and rejection reasons; ResultPeak's, same cascade stage",
+  },
 ];
 
 /**

@@ -23,9 +23,12 @@ import { onSyncProgress, saveAllMaterials } from "@/lib/offline/sync";
  * because a flat list has nowhere to put a mark, a scheme of work, or a term.
  */
 export default function DashboardView({
+  photo,
   announcements,
   shelf,
 }: {
+  /** The child's passport photo card. A slot like the others; see StudentPhotoCard. */
+  photo?: React.ReactNode;
   announcements?: React.ReactNode;
   shelf?: React.ReactNode;
 }) {
@@ -77,6 +80,8 @@ export default function DashboardView({
   return (
     <main className="mx-auto max-w-app px-5 py-8">
       <PageHeader title="Your subjects" />
+
+      {photo}
 
       <NavPills>
         <NavPill href="/student" active>

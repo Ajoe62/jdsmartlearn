@@ -3,10 +3,12 @@
  * the cache version can come from the deployment id.
  *
  * Deliberately hand-written rather than Workbox/Serwist: the whole surface is
- * three caches, one navigation fallback and one deny-list, and the deny-list is
+ * four caches, one navigation fallback and one deny-list, and the deny-list is
  * the thing that keeps tutor pages - which DO carry marking guides - out of the
  * cache. That has to stay readable at a glance (CLAUDE.md, Offline rules).
  */
+
+import { PHOTO_CACHE, PHOTO_PATH } from "@/lib/photos/url";
 
 function buildId(): string {
   return (
@@ -23,7 +25,9 @@ const VERSION = ${JSON.stringify(version)};
 const SHELL = "jd-shell-" + VERSION;
 const STATIC = "jd-static-" + VERSION;
 const FILES = "jd-files-v1";
-const OURS = [SHELL, STATIC, FILES];
+/** This child's own passport photo. Must equal PHOTO_CACHE in lib/photos/url. */
+const PHOTO = ${JSON.stringify(PHOTO_CACHE)};
+const OURS = [SHELL, STATIC, FILES, PHOTO];
 
 /** The offline renderer. Data-free, so it is safe on a shared phone. */
 const SHELL_URL = "/student/offline";
@@ -39,6 +43,14 @@ function denied(url, request) {
   if (url.origin !== self.location.origin) return true;
   if (url.pathname.startsWith("/tutor")) return true;
   if (url.pathname.startsWith("/api/tutor")) return true;
+  /**
+   * The student's own passport photo is allowed, and nothing else under
+   * /api/student. Exact path, so no future /api/student/photo-anything inherits
+   * it. Safe because the route serves only the signed-in child's own approved
+   * photo, and it lands in the PHOTO bucket, which every wipe deletes by name -
+   * wipeContent() included, so a different child signing in never meets it.
+   */
+  if (url.pathname === ${JSON.stringify(PHOTO_PATH)}) return false;
   // Student sync payloads live in IndexedDB, not here - caching them would put a
   // second, unmanaged copy outside the grace window and the wipe-on-sign-in path.
   if (url.pathname.startsWith("/api/student")) return true;
@@ -181,6 +193,17 @@ self.addEventListener("fetch", (event) => {
   // Saved original files, explicitly opted into by the student.
   if (/^\\/api\\/lessons\\/[^/]+\\/file$/.test(url.pathname)) {
     event.respondWith(cacheFirst(request, FILES));
+    return;
+  }
+
+  /**
+   * The child's photo. Cache-first on the full URL, whose ?s= and ?v= make every
+   * child and every approved version a key of its own, so nothing is ever stale.
+   * Only a 200 is stored (cacheFirst checks res.ok): a 404 "no photo yet" is
+   * asked again next time rather than remembered.
+   */
+  if (url.pathname === ${JSON.stringify(PHOTO_PATH)}) {
+    event.respondWith(cacheFirst(request, PHOTO));
     return;
   }
 

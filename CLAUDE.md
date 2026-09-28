@@ -28,7 +28,7 @@ JDSmartLearn runs **inside ResultPeak's existing Firebase project**. Same `proje
 
 ### Collections ResultPeak owns — READ ONLY, NEVER WRITE
 
-`schools`, `classes`, `students`, `studentAccess`, `studentUsernames`, `schoolSlugs`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`, `studentPhotos`, `studentPhotoSubmissions`
+`schools`, `classes`, `students`, `studentAccess`, `studentUsernames`, `schoolSlugs`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`, `studentPhotos`, `studentPhotoSubmissions`, `studentPhotoState`
 
 Never create, update, or delete a document in any of them. Never build roster CRUD, CSV import, or a second student registry — that data already exists and ResultPeak owns it.
 
@@ -355,7 +355,8 @@ exception, not commentary on it. Cross-repo half:
   lives in `studentPhotos/{studentId}`, a ResultPeak collection refused by
   `assertWritable()`. Pending photos live apart, in `studentPhotoSubmissions`,
   which this repo never reads: the document it does read holds approved bytes
-  and nothing else. The photo is part of the school's record of the child, and
+  and nothing else. `studentPhotoState` (their upload counts and rejection
+  reasons) is theirs too, and not read here. The photo is part of the school's record of the child, and
   that record is ResultPeak's. **This repo has no upload path and must never gain
   one:** the student dashboard's "Add or change photo" links out to ResultPeak.
   Two upload forms for one photo is the `studentLogins` mistake again.
@@ -369,16 +370,25 @@ exception, not commentary on it. Cross-repo half:
   product. A rejected or replaced photo is deleted, not archived.
 - **Served as bytes, behind the session, never as a link.** A student may load
   only their own photo; a tutor only students in their `assignedClasses`, read
-  fresh; an admin only their own school. Versioned by `photoUpdatedAt`, sent
-  `Cache-Control: private`. **Never add it to the public-route exception** — the
-  crest route stays the only unauthenticated file route, and it names a school,
-  never a child.
+  fresh; an admin only their own school. `/api/student/photo` is the student
+  route and `getOwnStudentPhoto()` in `src/lib/db/student-photo.ts` is the ONLY
+  read of `studentPhotos`; it takes a session, never a student id, and re-reads
+  `students/{id}` on every request so a deactivated child's photo stops at once.
+  Versioned by `photoUpdatedAt`, carried in the student session so a sync
+  spends no read on it. Sent `Cache-Control: private, no-store` — **not** the
+  crest's `immutable`, because the browser's HTTP cache is a copy no wipe here
+  can reach. **Never add it to the public-route exception** — the crest route
+  stays the only unauthenticated file route, and it names a school, never a
+  child.
 - **Never in a sync payload as a data URI.** The payload carries a small
   versioned URL, for the same ETag reason as the crest.
 - **On a shared phone, a child's own photo only.** It may be saved on the phone
   for offline use because the device store already holds one student at a time
-  and is wiped on switch, sign-out and expiry. Never another child's photo. A
-  tutor's class photos stay network-only.
+  and is wiped on switch, sign-out and expiry. The saved copy lives in its own
+  service worker bucket, `PHOTO_CACHE`, which `wipeContent()` and `wipeDevice()`
+  both delete by name, and the service worker allows that one exact path under
+  `/api/student` and nothing else. Never another child's photo. A tutor's class
+  photos stay network-only.
 - **Never sent to the AI provider.** No face detection, no "is this a passport
   photo" check through `src/lib/ai/provider.ts`. A human approves the photo.
 - **Location data is stripped before storage.** Phone cameras stamp GPS

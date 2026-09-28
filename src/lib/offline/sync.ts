@@ -23,6 +23,7 @@ import {
   requestPersistence,
   setMeta,
   wipeContent,
+  dropPhotoCache,
   type StoredLesson,
   type StoredMaterial,
   type StoredScheme,
@@ -214,6 +215,8 @@ async function runSync({ force }: { force?: boolean }): Promise<SyncResult> {
       schemes?: StudentSchemeSummary[];
       /** Absent when talking to a server that predates school branding. */
       brand?: OfflineBrand | null;
+      /** Absent when talking to a server that predates student photos. */
+      photoUrl?: string | null;
     };
     graceDaysFromServer = body.graceDays;
 
@@ -312,7 +315,19 @@ async function runSync({ force }: { force?: boolean }): Promise<SyncResult> {
        * different, the same way `announcements` is guarded above.
        */
       brand: body.brand === undefined ? meta?.brand : (body.brand ?? undefined),
+      /** Same undefined-versus-null distinction as `brand`, for the same reason. */
+      photoUrl: body.photoUrl === undefined ? meta?.photoUrl : (body.photoUrl ?? undefined),
     });
+
+    /**
+     * A new or removed photo: drop the old one from the phone now. One child's
+     * photo per device means one photo, not a trail of every version the school
+     * approved. The new address fetches and saves itself when the dashboard
+     * draws it.
+     */
+    if (body.photoUrl !== undefined && (body.photoUrl ?? undefined) !== meta?.photoUrl) {
+      await dropPhotoCache();
+    }
 
     /**
      * Announcements, written AFTER the meta row on purpose.

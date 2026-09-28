@@ -64,6 +64,13 @@ export const RP = {
    * that it has yet to be backfilled. Never fall back to a cached crest.
    */
   schoolBranding: "schoolBranding",
+  /**
+   * `studentPhotos/{studentId}`: a child's APPROVED passport photo, a JPEG data
+   * URI. READ ONLY here, always, and read by exactly one function:
+   * `getOwnStudentPhoto()` in `db/student-photo.ts`, for the signed-in student.
+   * See the RESULTPEAK_OWNED entry below for why this repo never writes it.
+   */
+  studentPhotos: "studentPhotos",
 } as const;
 
 /** JDSmartLearn owns these. Read + write. */
@@ -280,6 +287,13 @@ export const RESULTPEAK_OWNED = new Set<string>([
    * read it here either: a pending photo is not ours to show.
    */
   "studentPhotoSubmissions",
+  /**
+   * `studentPhotoState/{studentId}`: ResultPeak's per-student bookkeeping for
+   * photos - the daily upload count and the last rejection reason. Added on
+   * their side when they shipped, 2026-09-28. Not read here: the rejection
+   * reason is shown on their upload screen, which is where the child fixes it.
+   */
+  "studentPhotoState",
 ]);
 
 /**

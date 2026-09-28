@@ -3,7 +3,14 @@
 Copy everything below the line into a fresh Claude Code session opened in the
 **ResultPeak** repository.
 
-**Status on the JDSmartLearn side (2026-09-28): decided, guarded, nothing
+**Status (2026-09-28): SHIPPED on both sides.** ResultPeak shipped Tasks 0-7,
+named the deep link `/start/student?next=photo`, and added a third collection,
+`studentPhotoState` (upload counts, rejection reasons), which JDSmartLearn's
+write guard and purge report now name beside the other two. JDSmartLearn then
+shipped the display side: `/api/student/photo`, the dashboard photo card, the
+link out, and the offline copy. The text below is the brief as sent.
+
+**Status when sent: decided, guarded, nothing
 built.** JDSmartLearn has named `studentPhotos` and `studentPhotoSubmissions` as
 ResultPeak-owned collections that its write guard refuses, before either exists.
 It has built no upload, no storage and no display. **ResultPeak ships first.**

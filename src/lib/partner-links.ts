@@ -146,3 +146,20 @@ export function resultPeakSchoolUrl(slug?: string | null, origin?: string | null
 export function resultPeakStudentResultsUrl(origin?: string | null): string {
   return resultPeakUrl("/start/student?next=results", origin);
 }
+
+/**
+ * Where a child goes to add or change their passport photo: ResultPeak's upload
+ * screen, after sign-in there.
+ *
+ * THE ONLY WAY A PHOTO GETS INTO EITHER PRODUCT FROM A STUDENT. This repo has no
+ * upload form and must never gain one (CLAUDE.md, Student photo rules): the
+ * photo is ResultPeak's, and the school approves it there.
+ *
+ * `?next=photo` is a flag in the same sense as `?next=results` above: ResultPeak
+ * recognises the literal value and opens its photo screen after sign-in. It
+ * named this path when it shipped, 2026-09-28. A path, not a slug, so it is kept
+ * on a school's own results domain too.
+ */
+export function resultPeakStudentPhotoUrl(origin?: string | null): string {
+  return resultPeakUrl("/start/student?next=photo", origin);
+}

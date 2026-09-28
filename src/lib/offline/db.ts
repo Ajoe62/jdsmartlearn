@@ -11,6 +11,7 @@
 
 import type { NoticeItem, ReadState } from "@/lib/announcements/notices";
 import type { StudentSchemeSummary } from "@/types/schemes";
+import { PHOTO_CACHE } from "@/lib/photos/url";
 
 export const DB_NAME = "jdsmartlearn";
 /**
@@ -142,6 +143,12 @@ export type OfflineMeta = {
    * already gets.
    */
   brand?: OfflineBrand;
+  /**
+   * The address of this child's own approved passport photo, or absent for
+   * none. The BYTES are in the service worker's PHOTO_CACHE bucket, not here.
+   * Optional: a store written before photos existed has no such field.
+   */
+  photoUrl?: string;
 };
 
 /**
@@ -472,7 +479,23 @@ export async function wipeContent(): Promise<void> {
     // A scheme belongs to the class the previous student was in.
     clear(STORE.schemes).catch(() => {}),
     clear(STORE.meta).catch(() => {}),
+    /**
+     * The child's photo, in the Cache API rather than IndexedDB, so clearing
+     * the stores above would miss it. Every path that calls this - a different
+     * student, a closed grace window, a revoked account - is a path where the
+     * face must go too. wipeDevice() drops it with every other bucket as well.
+     */
+    dropPhotoCache(),
   ]);
+}
+
+/** Delete the saved photo bucket. Never throws: a wipe must not stop halfway. */
+export async function dropPhotoCache(): Promise<void> {
+  try {
+    if (typeof caches !== "undefined") await caches.delete(PHOTO_CACHE);
+  } catch {
+    // Storage denied. Nothing more we can do from here.
+  }
 }
 
 /**

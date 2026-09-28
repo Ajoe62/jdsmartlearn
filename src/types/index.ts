@@ -86,6 +86,24 @@ export interface ResultPeakStudent {
   className: string;
   schoolId: string;
   isActive: boolean;
+  /**
+   * When the APPROVED passport photo last changed; absent means no photo.
+   * ResultPeak moves it in the same batch as `studentPhotos/{id}`, and only when
+   * the approved bytes move. Read through `photoVersion()`, never directly - it
+   * is another product's field and its shape is not ours to rely on.
+   */
+  photoUpdatedAt?: unknown;
+}
+
+/**
+ * `studentPhotos/{studentId}` - ResultPeak's approved photo. READ ONLY here.
+ * Only the fields this repo checks; the rest is theirs.
+ */
+export interface ResultPeakStudentPhoto {
+  schoolId?: string;
+  studentId?: string;
+  /** "data:image/jpeg;base64,..." */
+  dataUri?: string;
 }
 
 /**

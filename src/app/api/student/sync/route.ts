@@ -8,6 +8,7 @@ import { getNoticesForClass } from "@/lib/db/announcements";
 import { getReadState } from "@/lib/db/read-state";
 import { toNoticeItem, visibleToStudent } from "@/lib/announcements/notices";
 import { listPublishedSchemesForClass, toSchemeSummary } from "@/lib/db/schemes";
+import { studentPhotoUrl } from "@/lib/photos/url";
 
 /**
  * How long a device may keep reading saved lessons after this sync. Read here,
@@ -96,6 +97,18 @@ export async function GET(req: Request) {
      * /api/student/announcements/read and takes back whatever the server says.
      */
     readState,
+    /**
+     * The child's own passport photo, as an ADDRESS - never the image. Null
+     * when ResultPeak holds no approved photo.
+     *
+     * Built from the session, which the refresh before every sync has just
+     * re-read from `students/{id}`: no Firestore read here. A data URI in this
+     * body would cost ~50 KB on every changed sync, because the whole body is
+     * ETagged - the same reason the crest is a URL.
+     */
+    photoUrl: session.photoVersion
+      ? studentPhotoUrl(session.studentId, session.photoVersion)
+      : null,
     /**
      * Null for a school we cannot resolve, which the device renders as the plain
      * product lockup - the same fallback every other surface uses.

@@ -148,6 +148,7 @@ did.
 | `src/app/(tutor)/tutor/settings/page.tsx` | "Open school profile in ResultPeak" | `/admin` |
 | `src/app/(student)/student/page.tsx` | "Take an exam" | `/start` |
 | `src/app/(student)/student/page.tsx` | "see your results" | `/start/student?next=results` |
+| `src/components/student/StudentPhotoCard.tsx` | "Add photo" / "Change photo" | `/start/student?next=photo` |
 
 Every one of these resolves against the school's own `resultsUrl` when it has
 one, and against `NEXT_PUBLIC_RESULTPEAK_URL` otherwise. The product door is the

@@ -5,6 +5,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { RP } from "@/lib/db/collections";
 import { resolveUsername } from "@/lib/db/student-logins";
 import { safeEqual } from "./compare";
+import { photoVersion } from "@/lib/photos/url";
 import type { ResultPeakStudent } from "@/types";
 
 /**
@@ -75,6 +76,16 @@ export interface StudentSession {
   studentId: string;
   schoolId: string;
   classId: string;
+  /**
+   * `students/{id}.photoUpdatedAt` in ms, or null for no approved photo.
+   *
+   * Carried in the session because sign-in and refresh ALREADY read the student
+   * document, so knowing whether there is a photo costs no extra Firestore read
+   * on any sync. It is at most one app-open stale: boot() refreshes the session
+   * before every sync. Optional, because a session issued before this field
+   * existed has none, and that reads as "no photo" until the next refresh.
+   */
+  photoVersion?: number | null;
 }
 
 /** Why a refresh failed, so the caller knows whether to wipe the device store. */
@@ -126,7 +137,12 @@ export async function verifyStudentCode(
   const student = studentSnap.data() as ResultPeakStudent | undefined;
   if (!student || student.isActive === false) return null;
 
-  return { studentId, schoolId: student.schoolId, classId: student.classId };
+  return {
+    studentId,
+    schoolId: student.schoolId,
+    classId: student.classId,
+    photoVersion: photoVersion(student.photoUpdatedAt),
+  };
 }
 
 export async function createStudentSession(s: StudentSession): Promise<void> {
@@ -199,6 +215,7 @@ export async function refreshStudentSession(): Promise<RefreshOutcome> {
     studentId,
     schoolId: student.schoolId,
     classId: student.classId,
+    photoVersion: photoVersion(student.photoUpdatedAt),
   };
   await createStudentSession(session);
 
@@ -262,6 +279,7 @@ export async function getStudentSession(): Promise<StudentSession | null> {
       studentId: String(payload.studentId),
       schoolId: String(payload.schoolId),
       classId: String(payload.classId),
+      photoVersion: photoVersion(payload.photoVersion),
     };
   } catch {
     return null;

@@ -50,6 +50,9 @@ import {
   CREST_TYPES,
 } from "../src/lib/branding/crest";
 import { JD, RESULTPEAK_OWNED, SHARED } from "../src/lib/db/collections";
+import { PHOTO_CACHE, PHOTO_PATH, photoVersion, studentPhotoUrl } from "../src/lib/photos/url";
+import { decodeJpegDataUri } from "../src/lib/photos/decode";
+import { GET as serviceWorkerRoute } from "../src/app/sw.js/route";
 import { readOnlyDb } from "../src/lib/db/read-only";
 import {
   PURGED_BY_RESULTPEAK,
@@ -4086,4 +4089,103 @@ test("every band asks for a question count the generation schema accepts", () =>
     const { count } = bandFor(level);
     assert.ok(count >= min && count <= max, `${level} asks for ${count}, schema allows ${min}-${max}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Student passport photos: ResultPeak's record, displayed here, never stored
+// ---------------------------------------------------------------------------
+
+test("photoVersion reads every shape photoUpdatedAt could plausibly take", () => {
+  const ms = 1_790_000_000_123;
+  assert.equal(photoVersion({ toMillis: () => ms }), ms);
+  assert.equal(photoVersion({ seconds: 1_790_000_000, nanoseconds: 123_000_000 }), ms);
+  assert.equal(photoVersion({ _seconds: 1_790_000_000, _nanoseconds: 123_000_000 }), ms);
+  assert.equal(photoVersion(new Date(ms)), ms);
+  assert.equal(photoVersion(ms), ms);
+  assert.equal(photoVersion(new Date(ms).toISOString()), ms);
+});
+
+test("photoVersion treats anything unusable as no photo, never a throw", () => {
+  for (const v of [undefined, null, 0, -5, NaN, "", "not a date", {}, [], true]) {
+    assert.equal(photoVersion(v), null, `expected null for ${JSON.stringify(v)}`);
+  }
+});
+
+test("a photo URL is per child and per version, on our own route", () => {
+  const a = studentPhotoUrl("stuA", 1000);
+  assert.equal(a, `${PHOTO_PATH}?s=stuA&v=1000`);
+  assert.notEqual(a, studentPhotoUrl("stuB", 1000));
+  assert.notEqual(a, studentPhotoUrl("stuA", 2000));
+  assert.equal(studentPhotoUrl("a&b", 1.9), `${PHOTO_PATH}?s=a%26b&v=1`);
+});
+
+test("decodeJpegDataUri serves a real JPEG and nothing else", () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+  const ok = decodeJpegDataUri(`data:image/jpeg;base64,${jpeg.toString("base64")}`);
+  assert.ok(ok && ok.equals(jpeg));
+
+  // Declared JPEG, bytes are a PNG: refused.
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]).toString("base64");
+  assert.equal(decodeJpegDataUri(`data:image/jpeg;base64,${png}`), null);
+  // An SVG can carry script. Never served, whatever it claims.
+  const svg = Buffer.from("<svg onload=alert(1)>").toString("base64");
+  assert.equal(decodeJpegDataUri(`data:image/svg+xml;base64,${svg}`), null);
+  assert.equal(decodeJpegDataUri(`data:image/jpeg;base64,${svg}`), null);
+  // Not a data URI at all - e.g. a URL somebody typed into the console.
+  assert.equal(decodeJpegDataUri("https://example.com/child.jpg"), null);
+  assert.equal(decodeJpegDataUri(undefined), null);
+  assert.equal(decodeJpegDataUri("data:image/jpeg;base64,"), null);
+});
+
+test("decodeJpegDataUri refuses an oversized photo before serving it", () => {
+  const big = Buffer.alloc(300 * 1024, 0);
+  big[0] = 0xff;
+  big[1] = 0xd8;
+  big[2] = 0xff;
+  assert.equal(decodeJpegDataUri(`data:image/jpeg;base64,${big.toString("base64")}`), null);
+  assert.ok(decodeJpegDataUri(`data:image/jpeg;base64,${big.toString("base64")}`, 400 * 1024));
+});
+
+test("all three ResultPeak photo collections are refused by the write guard", () => {
+  for (const name of ["studentPhotos", "studentPhotoSubmissions", "studentPhotoState"]) {
+    assert.ok(RESULTPEAK_OWNED.has(name), `${name} must be ResultPeak-owned`);
+    assert.throws(() => assertWritable(name), /ResultPeak owns this collection/);
+  }
+});
+
+test("the photo route only reads: no upload path exists in this repo", () => {
+  const route = readFileSync(
+    path.resolve(process.cwd(), "src/app/api/student/photo/route.ts"),
+    "utf8"
+  );
+  assert.match(route, /export async function GET/);
+  assert.doesNotMatch(route, /export (async )?function (POST|PUT|PATCH|DELETE)/);
+
+  // studentPhotos is read in exactly one place, and never the pending queue.
+  const reads = execFileSync("git", ["grep", "--untracked", "-l", "RP.studentPhotos", "--", "src"], {
+    encoding: "utf8",
+  })
+    .trim()
+    .split(/\r?\n/)
+    .map((f) => f.replace(/\\/g, "/"));
+  assert.deepEqual(reads, ["src/lib/db/student-photo.ts"]);
+});
+
+test("the service worker saves the child's photo, and still nothing else under /api/student", async () => {
+  const sw = await (await serviceWorkerRoute()).text();
+  const body = /function denied\(url, request\) \{[\s\S]*?\n\}/.exec(sw)?.[0];
+  assert.ok(body, "denied() not found in the service worker");
+  const denied = new Function(`${body}; return denied;`)() as (u: URL, r: { method: string }) => boolean;
+  const at = (p: string) => new URL(p, "https://jd.test");
+  // The worker compares against its own origin.
+  (globalThis as unknown as { self: unknown }).self = { location: { origin: "https://jd.test" } };
+
+  const get = { method: "GET" };
+  assert.equal(denied(at(`${PHOTO_PATH}?s=a&v=1`), get), false);
+  assert.equal(denied(at(PHOTO_PATH), { method: "POST" }), true);
+  for (const p of ["/api/student/sync", "/api/student/photos", "/api/student/photo/x", "/api/student/lessons"]) {
+    assert.equal(denied(at(p), get), true, `${p} must stay network-only`);
+  }
+  assert.match(sw, new RegExp(`const PHOTO = "${PHOTO_CACHE}"`));
+  assert.match(sw, /const OURS = \[SHELL, STATIC, FILES, PHOTO\]/);
 });
