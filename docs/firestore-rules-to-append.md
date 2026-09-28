@@ -505,3 +505,30 @@ looking for a rule that was never needed.
    Which crest is the real one is still undecided - see
    `docs/resultpeak-school-domains-prompt.md`, Part B. Do not act on this item
    until that is settled.
+
+---
+
+## Student photos: nothing to append from here, two collections ResultPeak must rule
+
+Added 2026-09-28. **JDSmartLearn needs no rule** for `studentPhotos`: it will
+read one document by id through the Admin SDK, which bypasses rules, and it
+never reads `studentPhotoSubmissions` at all. Both collections are ResultPeak's,
+and their rules are written in the ResultPeak repo as part of
+`docs/resultpeak-student-photos-prompt.md`, Task 7.
+
+The shape asked for there, recorded here so nobody goes looking for a missing
+JD block:
+
+```
+match /studentPhotos/{studentId} {
+  allow read, write: if false;   // served through authenticated routes only
+}
+match /studentPhotoSubmissions/{studentId} {
+  allow read, write: if false;   // written and read only by the photo service
+}
+```
+
+**Never a public `get` branch on either**, and do not copy the `schoolBranding`
+pattern (public get, denied list) here. That asymmetry is right for a crest,
+which is printed on a school gate. A student id appears in URLs, so a public
+`get` on a child's photo is a public photo.

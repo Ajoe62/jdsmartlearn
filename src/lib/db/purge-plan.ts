@@ -195,6 +195,20 @@ export const PURGED_BY_RESULTPEAK: readonly { collection: string; note: string }
     collection: "schoolBranding",
     note: "ResultPeak's projection; already in its cascade",
   },
+  {
+    /**
+     * Children's passport photographs. This product stores none: it serves a
+     * student their own photo from ResultPeak's record and keeps no copy. The
+     * only other place one lives is that student's own phone, which the offline
+     * store already wipes on sign-out, account switch and expiry.
+     */
+    collection: "studentPhotos",
+    note: "passport photos; ResultPeak's, and must be a stage of its cascade",
+  },
+  {
+    collection: "studentPhotoSubmissions",
+    note: "passport photos awaiting approval; ResultPeak's, same cascade stage",
+  },
 ];
 
 /**

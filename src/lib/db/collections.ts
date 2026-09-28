@@ -260,6 +260,26 @@ export const RESULTPEAK_OWNED = new Set<string>([
    * See lib/branding/school.ts.
    */
   "schoolDomains", "schoolBranding", "schoolSlugs",
+  /**
+   * `studentPhotos/{studentId}`: a child's passport photograph, and the queue of
+   * one waiting for approval. ResultPeak owns it, decided 2026-09-28. It may not
+   * exist yet; it is named here BEFORE it does, so the guard never has a window.
+   *
+   * THIS REPO HAS NO UPLOAD PATH FOR A PHOTO AND MUST NEVER GAIN ONE. The student
+   * dashboard links to ResultPeak's upload screen instead. Two upload forms for
+   * one photo is the `studentLogins` mistake again: a child with one picture on
+   * the exam screen and another in the reader, and nobody sure which one the
+   * school approved. See CLAUDE.md, Student photo rules, and
+   * docs/resultpeak-student-photos-prompt.md.
+   */
+  "studentPhotos",
+  /**
+   * `studentPhotoSubmissions/{studentId}`: a student's photo WAITING for school
+   * approval. Kept in a separate collection from `studentPhotos` on purpose, so
+   * the document this repo reads holds approved bytes and nothing else. Never
+   * read it here either: a pending photo is not ours to show.
+   */
+  "studentPhotoSubmissions",
 ]);
 
 /**

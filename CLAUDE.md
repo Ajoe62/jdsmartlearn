@@ -28,7 +28,7 @@ JDSmartLearn runs **inside ResultPeak's existing Firebase project**. Same `proje
 
 ### Collections ResultPeak owns — READ ONLY, NEVER WRITE
 
-`schools`, `classes`, `students`, `studentAccess`, `studentUsernames`, `schoolSlugs`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`
+`schools`, `classes`, `students`, `studentAccess`, `studentUsernames`, `schoolSlugs`, `schools/{id}/tutors`, `schools/{id}/admins`, `exams`, `examTemplates`, `results`, `examSessions`, `theorySubmissions`, `manualScores`, `termNotes`, `flags`, `notifications`, `adminAuditLogs`, `studyDocuments`, `attendance`, `studentPhotos`, `studentPhotoSubmissions`
 
 Never create, update, or delete a document in any of them. Never build roster CRUD, CSV import, or a second student registry — that data already exists and ResultPeak owns it.
 
@@ -135,7 +135,7 @@ and recording the real fix.
 3. **All secrets are server-side.** `FIREBASE_PRIVATE_KEY`, `GEMINI_API_KEY`, `STUDENT_SESSION_SECRET` must never be prefixed `NEXT_PUBLIC_` or referenced in a client component.
 4. **Marking guides are tutor-only.** A student response must never contain marking guide content. Check this on every route that returns lesson data.
 5. **Authorize server-side on every request.** A tutor may only touch classes in their `assignedClasses[]`. A student may only read published lessons for their own `classId`.
-6. **Minors' data.** Collect nothing new about students. JDSmartLearn stores only `studentId` references, never names, in its own collections.
+6. **Minors' data.** Collect nothing new about students. JDSmartLearn stores only `studentId` references, never names, in its own collections. **One owner-approved exception, 2026-09-28: the student passport photo** — collected and stored by ResultPeak, never by this repo, and only displayed here. See Student photo rules.
 
 ## Quota rules (shared project — a runaway query can break exam day, and now bills for it)
 
@@ -343,6 +343,55 @@ cross-repo half in `docs/resultpeak-school-branding-prompt.md`.
   because this work puts `school.name` within easy reach of the generation path.
 
 
+## Student photo rules
+
+Student passport photographs were added on 2026-09-28, on the owner's decision,
+as a deliberate exception to Security rule 6. **A photo of a child is the most
+sensitive thing either product holds.** The rules are the condition of the
+exception, not commentary on it. Cross-repo half:
+`docs/resultpeak-student-photos-prompt.md`.
+
+- **ResultPeak owns the photo. This repo displays it and never stores it.** It
+  lives in `studentPhotos/{studentId}`, a ResultPeak collection refused by
+  `assertWritable()`. Pending photos live apart, in `studentPhotoSubmissions`,
+  which this repo never reads: the document it does read holds approved bytes
+  and nothing else. The photo is part of the school's record of the child, and
+  that record is ResultPeak's. **This repo has no upload path and must never gain
+  one:** the student dashboard's "Add or change photo" links out to ResultPeak.
+  Two upload forms for one photo is the `studentLogins` mistake again.
+- **The school approves every student-submitted photo.** A student's upload is
+  `pending` and changes nothing anyone sees until a class teacher or school admin
+  approves it. There is no auto-approve branch. The photo is how an invigilator
+  checks who is sitting an exam and it prints on the report card, so a friend's
+  picture or a cartoon must never reach either. An upload by an admin or class
+  teacher is approved as it lands.
+- **Only the approved photo is ever shown**, and never a pending one, on either
+  product. A rejected or replaced photo is deleted, not archived.
+- **Served as bytes, behind the session, never as a link.** A student may load
+  only their own photo; a tutor only students in their `assignedClasses`, read
+  fresh; an admin only their own school. Versioned by `photoUpdatedAt`, sent
+  `Cache-Control: private`. **Never add it to the public-route exception** — the
+  crest route stays the only unauthenticated file route, and it names a school,
+  never a child.
+- **Never in a sync payload as a data URI.** The payload carries a small
+  versioned URL, for the same ETag reason as the crest.
+- **On a shared phone, a child's own photo only.** It may be saved on the phone
+  for offline use because the device store already holds one student at a time
+  and is wiped on switch, sign-out and expiry. Never another child's photo. A
+  tutor's class photos stay network-only.
+- **Never sent to the AI provider.** No face detection, no "is this a passport
+  photo" check through `src/lib/ai/provider.ts`. A human approves the photo.
+- **Location data is stripped before storage.** Phone cameras stamp GPS
+  coordinates into a photo; for a child that can be a home address. The image is
+  re-encoded (which drops that data) before it is stored.
+- **Deleted with the child.** Student removal and the school purge cascade both
+  delete the photo. How long a photo is kept after a student leaves or graduates
+  is **not yet decided by the owner** — until it is, nothing deletes a photo on a
+  timer, and nothing may be built that assumes a retention period.
+- **Consent.** The school is responsible for guardian consent under the Nigeria
+  Data Protection Act 2023. The upload screen says so; this repo does not build
+  consent records of its own.
+
 ## Out of scope for v1 — refuse these
 
 WhatsApp integration · payments or Paystack · chat · video streaming · live classes · quiz engine with auto-marked objective questions · multiple question difficulty tiers · attendance · timetable · admissions · multi-branch · local languages · voice narration · native mobile apps · revision recommendations derived from ResultPeak exam results (still blocked until ResultPeak tags questions by topic and grades server-side)
@@ -379,3 +428,4 @@ Active voice, sentence case, plain verbs. A button that says "Publish" produces 
 - [ ] No secret exposed to the client
 - [ ] No write to a ResultPeak-owned collection
 - [ ] If it touches student content: no marking guide reachable from a student device, and offline states written
+- [ ] If it touches a student photo: served only behind the session, only the approved photo, never stored by this repo, never sent to the AI
