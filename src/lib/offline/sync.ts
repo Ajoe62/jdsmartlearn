@@ -384,8 +384,9 @@ function graceUntil(): number {
 }
 
 /**
- * Fetch and save one lesson's material text. Called when a student opens a
- * lesson online, so re-reading it later needs no network.
+ * Fetch and save one lesson's body - material text and any topic sections.
+ * Called when a student opens a lesson online, so re-reading it later needs no
+ * network.
  */
 export async function saveMaterial(lessonId: string): Promise<StoredMaterial | null> {
   try {
@@ -394,13 +395,22 @@ export async function saveMaterial(lessonId: string): Promise<StoredMaterial | n
       credentials: "same-origin",
     });
     if (!r.ok) return null;
-    const body = (await r.json()) as { text: string; revision: number };
+    const body = (await r.json()) as {
+      text: string | null;
+      /** Absent from a server that predates weekly notes. */
+      sections?: StoredMaterial["sections"];
+      revision: number;
+    };
+    const sections = body.sections ?? null;
     const record: StoredMaterial = {
       lessonId,
       text: body.text,
+      sections,
       revision: body.revision,
       savedAt: Date.now(),
-      bytes: body.text.length,
+      bytes:
+        (body.text?.length ?? 0) +
+        (sections ? sections.reduce((n, s) => n + s.body.length + s.heading.length, 0) : 0),
     };
     await putMany(STORE.materials, [record]);
     await trimMaterials();
@@ -420,7 +430,7 @@ export async function saveAllMaterials(
 ): Promise<{ saved: number; failed: number }> {
   const lessons = await getAll<StoredLesson>(STORE.lessons);
   const have = new Set((await getAll<StoredMaterial>(STORE.materials)).map((m) => m.lessonId));
-  const todo = lessons.filter((l) => l.hasMaterial && !have.has(l.lessonId));
+  const todo = lessons.filter((l) => (l.hasMaterial || l.hasSections) && !have.has(l.lessonId));
 
   let saved = 0;
   let failed = 0;

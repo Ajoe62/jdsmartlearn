@@ -12,10 +12,13 @@ import {
   getGeneratedContent,
   writeAuditLog,
   toStudentPayload,
+  toStudentSections,
   clearStudentPayload,
 } from "@/lib/db/lessons";
+import { listTopics } from "@/lib/db/topics";
+import { cleanSections, topicsOf } from "@/lib/notes/arrange";
 import { studentLessonsTag, lessonViewTag } from "@/lib/db/student-content";
-import type { Topic } from "@/types";
+import type { NoteSection, NoteTopic, Topic } from "@/types";
 
 /**
  * Publish reviewed materials. Teacher review is mandatory: a lesson cannot be
@@ -54,6 +57,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     summary?: string;
     questions?: { number: number; question: string }[];
     markingGuide?: { number: number; keyPoints: string[] }[];
+    /** Weekly notes: the topic sections as the tutor left them on review. */
+    sections?: unknown;
     baseUpdatedAt?: number;
   };
 
@@ -73,23 +78,57 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     );
   }
 
+  /**
+   * Topic sections, weekly notes only. Edited sections are validated - a topic
+   * id must be one this school has for this subject, or it is dropped to a plain
+   * name - and unedited ones are the generated set as stored.
+   */
+  const weekly = lesson.kind === "weekly";
+  let sections: NoteSection[] | undefined;
+  if (weekly && body.sections !== undefined) {
+    const allowed = (await listTopics(session.schoolId))
+      .filter((t) => t.subjectId === lesson.subjectId)
+      .map((t) => ({ id: t.id, title: t.title }));
+    const cleaned = cleanSections(body.sections, allowed);
+    if ("error" in cleaned) {
+      return NextResponse.json({ error: cleaned.error }, { status: 400 });
+    }
+    sections = cleaned;
+  } else if (weekly) {
+    sections = content.sections;
+  }
+
   const edited =
     (body.summary !== undefined && body.summary !== content.summary) ||
     body.questions !== undefined ||
-    body.markingGuide !== undefined;
+    body.markingGuide !== undefined ||
+    (weekly && body.sections !== undefined);
 
   if (edited) {
     await adminDb.doc(`${JD.generatedContent}/${content.id}`).update({
       ...(body.summary !== undefined ? { summary: body.summary } : {}),
       ...(body.questions ? { questions: body.questions } : {}),
       ...(body.markingGuide ? { markingGuide: body.markingGuide } : {}),
+      ...(weekly && body.sections !== undefined && sections ? { sections } : {}),
       tutorEdited: true,
     });
   }
 
   // Resolve the topic title once, here, so a class sync never needs a topics read.
-  const topicSnap = await adminDb.doc(`${JD.topics}/${lesson.topicId}`).get();
-  const topic = topicSnap.data() as Topic | undefined;
+  const topicSnap = lesson.topicId
+    ? await adminDb.doc(`${JD.topics}/${lesson.topicId}`).get()
+    : null;
+  const topic = topicSnap?.data() as Topic | undefined;
+  const topicTitle = topic?.title ?? lesson.topicTitle ?? lesson.title;
+
+  /**
+   * The topic labels the student shelf groups by: one for a topic note, one per
+   * distinct section topic for a weekly note.
+   */
+  const topics: NoteTopic[] =
+    sections && sections.length > 0
+      ? topicsOf(sections)
+      : [{ id: lesson.topicId, title: topicTitle }];
 
   /**
    * Denormalize the student-safe guide onto the lesson so a whole class syncs in
@@ -102,13 +141,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       summary: body.summary ?? content.summary,
       questions: body.questions ?? content.questions,
     },
-    topic?.title ?? lesson.title
+    topicTitle,
+    { topics, sectionCount: sections?.length ?? 0 }
   );
 
   await adminDb.doc(`${JD.lessons}/${id}`).update({
     status: "published",
     publishedAt: Date.now(),
     studentPayload: payload,
+    // Sections live on the lesson, not in the payload - see Lesson.studentSections.
+    ...(sections && sections.length > 0
+      ? { studentSections: toStudentSections(sections) }
+      : {}),
     updatedAt: Date.now(),
   });
 
@@ -157,7 +201,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
     updatedAt: Date.now(),
   });
 
-  // Remove the denormalized copy too, or devices would keep syncing a guide the
+  // Remove the denormalized copy (and a weekly note's sections) too, or devices would keep syncing a guide the
   // tutor has withdrawn.
   await clearStudentPayload(id);
 

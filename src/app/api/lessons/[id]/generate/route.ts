@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
-import { JD } from "@/lib/db/collections";
+import { JD, RP } from "@/lib/db/collections";
 import { assertWritable } from "@/lib/db/write-guard";
 import {
   getTutorSession,
@@ -12,7 +12,12 @@ import { getSubjects } from "@/lib/db/resultpeak";
 import { generateStudyMaterials } from "@/lib/ai/provider";
 import { MIN_USABLE_CHARS } from "@/lib/extract/text";
 import { GenerationError } from "@/lib/ai/errors";
-import type { ClassLevel, Topic } from "@/types";
+import { MAX_LESSON_CHARS } from "@/lib/ai/prompt";
+import { listTopics } from "@/lib/db/topics";
+import { classLevel } from "@/lib/class-level";
+import { assembleSections, numberedText, splitParagraphs } from "@/lib/notes/arrange";
+import { weekLabel } from "@/lib/notes/group";
+import type { ClassLevel, ResultPeakClass, Topic } from "@/types";
 
 export const maxDuration = 60;
 
@@ -60,28 +65,68 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     );
   }
 
-  const topicSnap = await adminDb.doc(`${JD.topics}/${lesson.topicId}`).get();
-  const topic = topicSnap.data() as Topic | undefined;
-  const subjects = await getSubjects(session.schoolId);
+  const weekly = lesson.kind === "weekly";
+  const [topicSnap, classSnap, subjects, schoolTopics] = await Promise.all([
+    lesson.topicId ? adminDb.doc(`${JD.topics}/${lesson.topicId}`).get() : Promise.resolve(null),
+    adminDb.doc(`${RP.classes}/${lesson.classId}`).get(),
+    getSubjects(session.schoolId),
+    // One bounded query, only for a weekly note: the topics it may be sorted into.
+    weekly ? listTopics(session.schoolId) : Promise.resolve([] as Topic[]),
+  ]);
+  const topic = topicSnap?.data() as Topic | undefined;
   const subjectName =
     subjects.find((s) => s.id === lesson.subjectId)?.name ?? lesson.subjectId;
+
+  /**
+   * The reading level. A weekly note has no topic to carry one, so the class
+   * is the source - and it is the better source anyway, since a topic's level
+   * is only ever the class's copied.
+   */
+  const level: ClassLevel =
+    topic?.level ?? classLevel((classSnap.data() as ResultPeakClass | undefined) ?? {}) ?? "SS2";
+
+  /**
+   * A weekly note's sort targets: this school's topics for this subject at this
+   * level - curriculum titles, no personal data. Narrowed to the level so a
+   * JSS1 week is never filed under an SS3 topic of the same subject.
+   */
+  const candidates = schoolTopics
+    .filter((t) => t.subjectId === lesson.subjectId && t.level === level)
+    .slice(0, 60)
+    .map((t) => ({ id: t.id, title: t.title }));
+  const paragraphs = weekly ? splitParagraphs(lesson.extractedText) : [];
+  const heading = weekLabel(lesson.week ?? null);
 
   await adminDb.doc(`${JD.lessons}/${id}`).update({ status: "generating", updatedAt: Date.now() });
 
   try {
     // Payload carries lesson content only - no names, no ids. See CLAUDE.md.
     const { result, meta } = await generateStudyMaterials({
-      lessonText: lesson.extractedText,
+      lessonText: weekly ? numberedText(paragraphs, MAX_LESSON_CHARS) : lesson.extractedText,
       subjectName,
-      topicTitle: topic?.title ?? lesson.title,
-      level: (topic?.level ?? "SS2") as ClassLevel,
+      topicTitle: topic?.title ?? (weekly ? `${heading} notes` : lesson.title),
+      level,
+      ...(weekly
+        ? { weekly: { week: lesson.week ?? null, topics: candidates.map((c) => c.title) } }
+        : {}),
     });
+
+    /**
+     * The sections are BUILT here from the tutor's own paragraphs; the model
+     * supplied only numbers. Whatever it returned, every paragraph lands in
+     * exactly one section, in the tutor's words.
+     */
+    const { sections: arranged, ...guide } = result;
+    const sections = weekly
+      ? assembleSections(paragraphs, arranged ?? [], candidates, `${heading} notes`)
+      : undefined;
 
     assertWritable(JD.generatedContent);
     await adminDb.collection(JD.generatedContent).add({
       schoolId: lesson.schoolId,
       lessonId: id,
-      ...result,
+      ...guide,
+      ...(sections ? { sections } : {}),
       ...meta,
       tutorEdited: false,
       version: Date.now(),

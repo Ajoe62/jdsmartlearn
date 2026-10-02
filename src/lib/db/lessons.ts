@@ -6,6 +6,9 @@ import { assertWritable } from "./write-guard";
 import type {
   GeneratedContent,
   Lesson,
+  NoteKind,
+  NoteSection,
+  NoteTopic,
   StudentLessonView,
   StudentPayload,
 } from "@/types";
@@ -45,7 +48,7 @@ export async function listLessonsForSchool(schoolId: string) {
   const snap = await adminDb
     .collection(JD.lessons)
     .where("schoolId", "==", schoolId)
-    .select("title", "className", "classId", "subjectId", "tutorId", "status", "publishedAt", "materialPublishedAt", "updatedAt")
+    .select("title", "className", "classId", "subjectId", "tutorId", "status", "publishedAt", "materialPublishedAt", "updatedAt", "kind", "week")
     .limit(QUERY_LIMIT)
     .get();
   return snap.docs
@@ -83,6 +86,11 @@ export type VisibleLesson = {
    */
   term: string | null;
   session: string | null;
+  /** "topic" for every lesson written before note kinds existed. */
+  kind: NoteKind;
+  week: number | null;
+  /** Topic title copied at creation; absent on older lessons and weekly notes. */
+  topicTitle?: string;
   /** Denormalized study guide. Absent on lessons published before the backfill. */
   studentPayload?: StudentPayload;
   /** Original-file metadata, if one was uploaded. */
@@ -116,6 +124,9 @@ export async function listVisibleLessonsForClass(
       "updatedAt",
       "term",
       "session",
+      "kind",
+      "week",
+      "topicTitle",
       "studentPayload",
       "fileName",
       "fileSize",
@@ -134,6 +145,9 @@ export async function listVisibleLessonsForClass(
         updatedAt?: number;
         term?: string | null;
         session?: string | null;
+        kind?: NoteKind;
+        week?: number | null;
+        topicTitle?: string;
         studentPayload?: StudentPayload;
         fileName?: string;
         fileSize?: number;
@@ -148,6 +162,9 @@ export async function listVisibleLessonsForClass(
         updatedAt: x.updatedAt ?? 0,
         term: x.term ?? null,
         session: x.session ?? null,
+        kind: x.kind === "weekly" ? ("weekly" as const) : ("topic" as const),
+        week: typeof x.week === "number" ? x.week : null,
+        topicTitle: x.topicTitle,
         studentPayload: x.studentPayload,
         fileName: x.fileName,
         fileSize: x.fileSize,
@@ -167,6 +184,9 @@ export async function listVisibleLessonsForClass(
         updatedAt: l.updatedAt,
         term: l.term,
         session: l.session,
+        kind: l.kind,
+        week: l.week,
+        topicTitle: l.topicTitle,
         studentPayload: l.studentPayload,
         fileName: l.fileName,
         fileSize: l.fileSize,
@@ -176,13 +196,13 @@ export async function listVisibleLessonsForClass(
 }
 
 /**
- * Edit a lesson's own fields after creation. Only these four are editable -
+ * Edit a lesson's own fields after creation. Only these are editable -
  * status/publish flags have their own routes, and everything else is identity.
  * classId/className must be set together (denormalized pair).
  */
 export async function updateLessonDetails(
   lessonId: string,
-  patch: Partial<Pick<Lesson, "title" | "extractedText" | "classId" | "className">>
+  patch: Partial<Pick<Lesson, "title" | "extractedText" | "classId" | "className" | "week">>
 ): Promise<void> {
   assertWritable(JD.lessons);
   await adminDb.doc(`${JD.lessons}/${lessonId}`).update({ ...patch, updatedAt: Date.now() });
@@ -261,14 +281,36 @@ export async function getGeneratedContent(lessonId: string): Promise<GeneratedCo
  */
 export function toStudentPayload(
   content: Pick<GeneratedContent, "summary" | "questions">,
-  topicTitle: string
+  topicTitle: string,
+  notes?: { topics: NoteTopic[]; sectionCount: number }
 ): StudentPayload {
   return {
     summary: content.summary,
     questions: content.questions,
     topicTitle,
+    ...(notes
+      ? {
+          topics: notes.topics.map((t) => ({ id: t.id, title: t.title })),
+          sectionCount: notes.sectionCount,
+        }
+      : {}),
     revision: Date.now(),
   };
+}
+
+/**
+ * The ONLY constructor for Lesson.studentSections, and the same discipline as
+ * toStudentPayload: each field named, nothing spread. A section is a heading, a
+ * topic label and the tutor's own lesson text - there is no field a marking
+ * guide could occupy, and naming the fields keeps it that way.
+ */
+export function toStudentSections(sections: NoteSection[]): NoteSection[] {
+  return sections.map((s) => ({
+    heading: s.heading,
+    topicId: s.topicId,
+    topicTitle: s.topicTitle,
+    body: s.body,
+  }));
 }
 
 /** Attach the student-safe study guide to a lesson (called on publish). */
@@ -291,6 +333,8 @@ export async function clearStudentPayload(lessonId: string): Promise<void> {
   assertWritable(JD.lessons);
   await adminDb.doc(`${JD.lessons}/${lessonId}`).update({
     studentPayload: FieldValue.delete(),
+    // Published and withdrawn with the guide, so it goes with it.
+    studentSections: FieldValue.delete(),
     updatedAt: Date.now(),
   });
 }

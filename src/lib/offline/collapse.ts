@@ -33,8 +33,17 @@ export type CreateOp = {
   target: LocalId;
   title: string;
   classId: string;
+  /** "" on a weekly note, which has no topic. */
   topicId: string;
   text: string;
+  /**
+   * Weekly or topic note, its week, and - weekly only - the subject, which a
+   * topic note takes from its topic instead. Optional so an op queued by a page
+   * that predates weekly notes still flushes, as a topic note.
+   */
+  noteKind?: "weekly" | "topic";
+  week?: number | null;
+  subjectId?: string;
   /** Publish the raw material as soon as it lands. Folded in from a material op. */
   publishMaterial?: boolean;
 };

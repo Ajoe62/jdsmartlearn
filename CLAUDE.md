@@ -277,6 +277,31 @@ not commentary on it.
 - A scheme has no marking guide and no field one could occupy, so it is safe for
   the student device store. It is the ideal thing to save on a phone.
 
+## Study notes rules
+
+Weekly notes, topic grouping and note search were added on 2026-10-02, on the
+owner's decision. A lesson is a **weekly note** (one week of a subject, sorted
+into topics by the AI) or a **topic note** (the shape every lesson had before).
+`kind` absent means topic, so older lessons need no backfill.
+
+- **The AI sorts; it never rewrites.** For a weekly note the model returns
+  paragraph NUMBERS per topic, and `assembleSections()` in `src/lib/notes/arrange.ts`
+  builds each section from the tutor's own paragraphs. Every paragraph lands in
+  exactly one section. Never change this to have the model return section text:
+  keeping the teacher's words is the owner's rule, and the numbers-only design is
+  what enforces it.
+- **Sorting is part of the one generate call** and spends no extra generation.
+  Sections are reviewed with the study guide and publish with it; no section is
+  student-visible before a tutor publishes.
+- **Weeks reset each term**, 1 to `MAX_WEEK`. A week means nothing without the
+  lesson's own `term` and `session`, and is only ever grouped inside them.
+- **Sections live on the lesson (`studentSections`), never in `studentPayload`.**
+  The payload rides the class sync bundle, and a term of weekly notes there would
+  outgrow the cache entry. Sections travel per lesson with the material body.
+  Built only by `toStudentSections()`, which names its fields.
+- **Search runs on the phone**, over what sync already saved. Never add a server
+  search route: it would be a Firestore read per keystroke.
+
 ## School branding rules
 
 Per-school branding was added on 2026-08-27, on the owner's call that the product

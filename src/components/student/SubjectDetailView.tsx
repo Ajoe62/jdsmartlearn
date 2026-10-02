@@ -1,16 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Badge from "@/components/ui/Badge";
 import { Card, CardHeader, CardLink } from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import PageHeader, { NavPill, NavPills } from "@/components/ui/PageHeader";
 import { STORE, getAll } from "@/lib/offline/db";
-import type { StoredLesson, StoredScheme } from "@/lib/offline/db";
+import type { StoredLesson, StoredMaterial, StoredScheme } from "@/lib/offline/db";
 import { onSyncProgress } from "@/lib/offline/sync";
+import NoteSearch, { type SearchRow } from "@/components/student/NoteSearch";
+import NotesByWeek, { NotesByTopic } from "@/components/student/NotesShelf";
+import { toNoteRow, type NoteRow } from "@/lib/notes/group";
 
 /**
- * One subject: its lessons, its scheme of work, and this child's marks in it.
+ * One subject: its study notes - by week or by topic, with search - its scheme
+ * of work, and this child's marks in it.
  *
  * Rendered by BOTH paths, like every other student view - the server passes
  * `initial*` on the first visit and this reads IndexedDB afterwards, so the page
@@ -20,14 +23,8 @@ import { onSyncProgress } from "@/lib/offline/sync";
  * and schemes as `StudentSchemeSummary`; neither shape has a field for one.
  */
 
-export interface SubjectLessonRow {
-  lessonId: string;
-  title: string;
-  hasMaterial: boolean;
-  hasStudyGuide: boolean;
-  term: string | null;
-  session: string | null;
-}
+/** A note row. Built with toNoteRow() by both the server page and the device. */
+export type SubjectLessonRow = NoteRow;
 
 export interface SubjectSchemeRow {
   schemeId: string;
@@ -67,6 +64,27 @@ export default function SubjectDetailView({
 }) {
   const [lessons, setLessons] = useState(initialLessons);
   const [schemes, setSchemes] = useState(initialSchemes);
+  /** Notes whose text is saved on this phone - the mint tick. */
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [view, setView] = useState<"week" | "topic">("week");
+
+  // Remember the child's choice of view on this phone. A convenience only: it
+  // holds no content, and losing it costs one tap.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("jd-notes-view") === "topic") setView("topic");
+    } catch {
+      // Storage blocked. The default view stands.
+    }
+  }, []);
+  function chooseView(v: "week" | "topic") {
+    setView(v);
+    try {
+      localStorage.setItem("jd-notes-view", v);
+    } catch {
+      // Storage blocked. The choice lasts for this visit.
+    }
+  }
   /**
    * Resolved from the device when the offline shell renders this page: the URL
    * carries only the subject id, so the shell passes the id as the name and this
@@ -79,11 +97,13 @@ export default function SubjectDetailView({
 
     const load = async () => {
       try {
-        const [lessonRows, schemeRows] = await Promise.all([
+        const [lessonRows, schemeRows, bodies] = await Promise.all([
           getAll<StoredLesson>(STORE.lessons),
           getAll<StoredScheme>(STORE.schemes),
+          getAll<StoredMaterial>(STORE.materials),
         ]);
         if (!alive) return;
+        setSaved(new Set(bodies.map((b) => b.lessonId)));
 
         const mine = lessonRows.filter((l) => l.subjectId === subjectId);
         const denormalized =
@@ -93,18 +113,7 @@ export default function SubjectDetailView({
 
         // Only take over once the device has this subject. Otherwise the server
         // copy stands - a first visit must not blank.
-        if (mine.length > 0) {
-          setLessons(
-            mine.map((l) => ({
-              lessonId: l.lessonId,
-              title: l.title,
-              hasMaterial: l.hasMaterial,
-              hasStudyGuide: l.hasStudyGuide,
-              term: l.term ?? null,
-              session: l.session ?? null,
-            }))
-          );
-        }
+        if (mine.length > 0) setLessons(mine.map(toNoteRow));
         const mySchemes = schemeRows.filter((s) => s.subjectId === subjectId);
         if (mySchemes.length > 0) {
           setSchemes(
@@ -163,49 +172,47 @@ export default function SubjectDetailView({
       )}
 
       <section className="mt-8" aria-labelledby="lessons-heading">
-        <h2 id="lessons-heading" className="text-eyebrow font-semibold uppercase text-muted">
-          Lessons
-        </h2>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <h2 id="lessons-heading" className="text-heading">
+            Study notes
+          </h2>
+          {lessons.length > 0 && (
+            <div
+              className="inline-flex rounded-full border border-line bg-canvas p-1"
+              role="tablist"
+              aria-label="Arrange notes"
+            >
+              <ViewTab active={view === "week"} onClick={() => chooseView("week")}>
+                By week
+              </ViewTab>
+              <ViewTab active={view === "topic"} onClick={() => chooseView("topic")}>
+                By topic
+              </ViewTab>
+            </div>
+          )}
+        </div>
+
+        {lessons.length > 0 && (
+          <NoteSearch
+            initial={lessons.map(
+              (l): SearchRow => ({ ...l, subjectId, subjectName: name })
+            )}
+            subjectId={subjectId}
+            label={`Search ${name} notes`}
+          />
+        )}
+
         {lessons.length === 0 ? (
-          <div className="mt-2.5">
-            <EmptyState title="No lessons yet">
-              Your teacher will publish {name} lessons here soon. Check back
+          <div className="mt-3">
+            <EmptyState title="No study notes yet">
+              Your teacher will publish {name} notes here soon. Check back
               after your next class.
             </EmptyState>
           </div>
+        ) : view === "week" ? (
+          <NotesByWeek rows={lessons} saved={saved} />
         ) : (
-          <ul className="mt-2.5 space-y-2.5">
-            {lessons.map((l) => (
-              <li key={l.lessonId}>
-                <CardLink href={`/student/lessons/${l.lessonId}`} className="group">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-display font-semibold">{l.title}</p>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        {l.hasStudyGuide && <Badge tone="info">Study guide</Badge>}
-                        {l.hasMaterial && <Badge tone="neutral">Material</Badge>}
-                        <span className="text-xs text-muted">{termLabel(l)}</span>
-                      </div>
-                    </div>
-                    <svg
-                      className="h-4 w-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      aria-hidden
-                    >
-                      <path
-                        d="m6 3.5 4.5 4.5L6 12.5"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                </CardLink>
-              </li>
-            ))}
-          </ul>
+          <NotesByTopic rows={lessons} />
         )}
       </section>
 
@@ -241,6 +248,32 @@ export default function SubjectDetailView({
         </section>
       )}
     </main>
+  );
+}
+
+/** One half of the By week / By topic switch. */
+function ViewTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={
+        "min-h-[40px] rounded-full px-4 text-sm font-medium transition-colors " +
+        (active ? "bg-brand text-white shadow-brand" : "text-muted hover:text-ink")
+      }
+    >
+      {children}
+    </button>
   );
 }
 

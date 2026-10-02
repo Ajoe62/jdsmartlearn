@@ -17,6 +17,8 @@ import {
 import { studentLessonsTag } from "@/lib/db/student-content";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
 import { lessonFileKey } from "@/lib/storage/keys";
+import { getSubjects } from "@/lib/db/resultpeak";
+import { parseWeek } from "@/lib/notes/arrange";
 import {
   UploadError,
   claimUpload,
@@ -26,7 +28,7 @@ import {
   tutorActor,
   type ClaimedFile,
 } from "@/lib/storage/uploads";
-import type { ResultPeakClass, Topic } from "@/types";
+import { MAX_WEEK, type NoteKind, type ResultPeakClass, type Topic } from "@/types";
 
 export const maxDuration = 60;
 
@@ -62,6 +64,15 @@ export async function POST(req: Request) {
 
   const classId = String(form.get("classId") ?? "");
   const topicId = String(form.get("topicId") ?? "");
+  /**
+   * Weekly or topic (owner's decision, 2026-10-02). Anything but "weekly" is a
+   * topic note, so a queued create from a page that predates the field - which
+   * sends no kind - lands exactly as it always did.
+   */
+  const kind: NoteKind = String(form.get("kind") ?? "") === "weekly" ? "weekly" : "topic";
+  const week = parseWeek(form.get("week"), MAX_WEEK);
+  /** Sent only by a weekly note, which has no topic to take the subject from. */
+  const formSubjectId = String(form.get("subjectId") ?? "");
   const title = String(form.get("title") ?? "").trim();
   const pasted = String(form.get("text") ?? "").trim();
   const uploadKey = form.get("uploadKey");
@@ -85,7 +96,13 @@ export async function POST(req: Request) {
     return bad("This page is out of date. Reload it, then choose the file again.");
   }
 
-  if (!title || !classId || !topicId) {
+  if (week === undefined) return bad(`Choose a week from 1 to ${MAX_WEEK}.`);
+  if (kind === "weekly") {
+    if (!title || !classId || !formSubjectId) {
+      return bad("Add a title and choose a class and subject.");
+    }
+    if (week === null) return bad("Choose which week these notes are for.");
+  } else if (!title || !classId || !topicId) {
     return bad("Add a title and choose a class and topic.");
   }
 
@@ -103,14 +120,24 @@ export async function POST(req: Request) {
    * the AI prompt) or given a spoofed class name. Both are denormalized onto the
    * lesson and would ride out to every student device.
    */
-  const [topicSnap, classSnap] = await Promise.all([
-    adminDb.doc(`${JD.topics}/${topicId}`).get(),
+  /**
+   * A weekly note has no topic, so its subject comes from the form - checked
+   * here against the school's own subject list, and then against the tutor's
+   * allocation below exactly as a topic's subject is. A topic note still takes
+   * its subject from the topic and ignores any subject the form sent.
+   */
+  const [topicSnap, classSnap, subjects] = await Promise.all([
+    kind === "topic" ? adminDb.doc(`${JD.topics}/${topicId}`).get() : Promise.resolve(null),
     adminDb.doc(`${RP.classes}/${classId}`).get(),
+    kind === "weekly" ? getSubjects(session.schoolId) : Promise.resolve([]),
   ]);
 
-  const topic = topicSnap.data() as Topic | undefined;
-  if (!topic || topic.schoolId !== session.schoolId) {
+  const topic = topicSnap?.data() as Topic | undefined;
+  if (kind === "topic" && (!topic || topic.schoolId !== session.schoolId)) {
     return bad("That topic isn't available.");
+  }
+  if (kind === "weekly" && !subjects.some((s) => s.id === formSubjectId)) {
+    return bad("That subject isn't available.");
   }
 
   const cls = classSnap.data() as ResultPeakClass | undefined;
@@ -118,8 +145,8 @@ export async function POST(req: Request) {
     return bad("That class isn't available.");
   }
 
-  // Trust the topic for the subject and the roster for the display name.
-  const subjectId = topic.subjectId;
+  // Trust the topic (or the school's list) for the subject and the roster for the display name.
+  const subjectId = topic ? topic.subjectId : formSubjectId;
   const className = cls.name;
 
   /**
@@ -191,7 +218,11 @@ export async function POST(req: Request) {
       {
         schoolId: session.schoolId,
         tutorId: session.uid,
-        topicId,
+        topicId: topic ? topicId : null,
+        // Copied once so the student shelf can label the note with no topics read.
+        ...(topic ? { topicTitle: topic.title } : {}),
+        kind,
+        week,
         classId,
         className,
         subjectId,

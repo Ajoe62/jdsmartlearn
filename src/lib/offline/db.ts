@@ -11,6 +11,7 @@
 
 import type { NoticeItem, ReadState } from "@/lib/announcements/notices";
 import type { StudentSchemeSummary } from "@/types/schemes";
+import type { NoteKind, NoteSection, NoteTopic } from "@/types";
 import { PHOTO_CACHE } from "@/lib/photos/url";
 
 export const DB_NAME = "jdsmartlearn";
@@ -179,6 +180,15 @@ export type StoredLesson = {
   lessonId: string;
   title: string;
   topicTitle: string;
+  /**
+   * Weekly or topic note, its week, and its topic labels. OPTIONAL because a
+   * row saved before 2026-10-02 has none until the next sync rewrites it; read
+   * them through toNoteRow() in lib/notes/group, which supplies the defaults.
+   */
+  kind?: NoteKind;
+  week?: number | null;
+  topics?: NoteTopic[];
+  hasSections?: boolean;
   subjectId: string;
   subjectName: string;
   hasMaterial: boolean;
@@ -192,9 +202,19 @@ export type StoredLesson = {
   savedAt: number;
 };
 
+/**
+ * One lesson's saved BODY: its material text and, on a weekly note, its topic
+ * sections. Kept in one row because they arrive in one response and expire
+ * together on the same revision.
+ *
+ * `text` is null when only the study guide is published (a weekly note's
+ * sections, no material). Sections are the tutor's own lesson text arranged by
+ * topic - no marking guide, and no field one could occupy.
+ */
 export type StoredMaterial = {
   lessonId: string;
-  text: string;
+  text: string | null;
+  sections?: NoteSection[] | null;
   revision: number;
   savedAt: number;
   bytes: number;

@@ -4,6 +4,9 @@ import { getSchoolBrand } from "@/lib/branding/school";
 import { getNoticesForClass } from "@/lib/db/announcements";
 import { getReadState } from "@/lib/db/read-state";
 import { getSubjectShelf } from "@/lib/db/subject-shelf";
+import { getClassSyncBundle } from "@/lib/db/student-content";
+import { toNoteRow } from "@/lib/notes/group";
+import NoteSearch from "@/components/student/NoteSearch";
 import { toNoticeItem, visibleToStudent } from "@/lib/announcements/notices";
 import Announcements from "@/components/student/Announcements";
 import DashboardView from "@/components/student/DashboardView";
@@ -34,7 +37,7 @@ export default async function StudentHome() {
   const session = await getStudentSession();
   if (!session) redirect("/student/sign-in");
 
-  const [shelf, noticeCandidates, readState, brand] = await Promise.all([
+  const [shelf, noticeCandidates, readState, brand, notes] = await Promise.all([
     getSubjectShelf(session.schoolId, session.classId, session.studentId),
     getNoticesForClass(session.schoolId, session.classId),
     getReadState(session.schoolId, session.studentId),
@@ -45,6 +48,12 @@ export default async function StudentHome() {
      * it on this request. Never fans out.
      */
     getSchoolBrand(session.schoolId),
+    /**
+     * Titles, topics and weeks for the search box on a first visit. The same
+     * cached class bundle the shelf above already read - no extra Firestore
+     * read. Afterwards the box searches the phone's own copy.
+     */
+    getClassSyncBundle(session.schoolId, session.classId),
   ]);
 
   const notices = visibleToStudent(noticeCandidates, session.classId, Date.now()).map(
@@ -80,6 +89,19 @@ export default async function StudentHome() {
           />
         }
         announcements={<Announcements initial={notices} initialReadState={readState} />}
+        search={
+          notes.length > 0 ? (
+            <NoteSearch
+              // Only the small fields - never a study guide body in the page.
+              initial={notes.map((l) => ({
+                ...toNoteRow(l),
+                subjectId: l.subjectId,
+                subjectName: l.subjectName,
+              }))}
+              label="Search notes and topics"
+            />
+          ) : undefined
+        }
         shelf={
           <SubjectShelfView
             initial={shelf.subjects}

@@ -169,10 +169,85 @@ export interface Topic {
 
 export type LessonStatus = "draft" | "generating" | "generated" | "published";
 
+/**
+ * How a study note is organised (owner's decision, 2026-10-02).
+ *
+ *   "weekly"  one week's notes for a subject, which may cover several topics.
+ *             The AI sorts it into topic sections; the tutor reviews them.
+ *   "topic"   one topic's notes - the shape every lesson had before this field.
+ *
+ * ABSENT MEANS "topic". Every lesson written before 2026-10-02 is a topic note,
+ * and is read as one without a backfill.
+ */
+export type NoteKind = "weekly" | "topic";
+
+/**
+ * School weeks in one term. Weeks RESET EACH TERM (owner's decision,
+ * 2026-10-02): Week 1 of second term is not Week 14 of the year. A week number
+ * therefore means nothing without the lesson's own `term` and `session`.
+ */
+export const MAX_WEEK = 14;
+
+/** A topic a note covers, as a label. `id` is null for a name with no topic document. */
+export interface NoteTopic {
+  id: string | null;
+  title: string;
+}
+
+/**
+ * One topic section of a weekly note.
+ *
+ * `body` is THE TUTOR'S OWN WORDS, never the model's (owner's decision,
+ * 2026-10-02). The model only says which paragraphs belong to which topic;
+ * lib/notes/arrange assembles the body from the lesson's own paragraphs, so a
+ * model cannot paraphrase, shorten or invent a sentence here even if it tries.
+ *
+ * Student-safe by construction: a heading, a topic label and lesson text. There
+ * is no field a marking guide could occupy. Build the student copy only through
+ * toStudentSections() in lib/db/lessons.
+ */
+export interface NoteSection {
+  heading: string;
+  topicId: string | null;
+  topicTitle: string;
+  body: string;
+}
+
 export interface Lesson {
   id: string;
   schoolId: string;
-  topicId: string;
+  /**
+   * The topic a TOPIC note belongs to. Null on a weekly note, whose topics are
+   * its sections' - a week usually covers more than one, and the tutor is not
+   * asked to pick (owner's decision, 2026-10-02).
+   */
+  topicId: string | null;
+  /**
+   * The topic's title, copied at creation so a class sync can label a note by
+   * topic without a topics read. Absent on lessons created before 2026-10-02;
+   * those fall back to the title resolved at publish.
+   */
+  topicTitle?: string;
+  /** Absent means "topic". See NoteKind. */
+  kind?: NoteKind;
+  /**
+   * The school week within the lesson's own term, 1..MAX_WEEK, or null when
+   * not set. Required on a weekly note, optional on a topic note. Absent on
+   * lessons created before 2026-10-02, which show under "Week not set".
+   */
+  week?: number | null;
+  /**
+   * The approved topic sections of a weekly note, written on publish and
+   * removed on unpublish - the same lifecycle as studentPayload.
+   *
+   * ON THE LESSON, NOT IN studentPayload, and deliberately so: studentPayload
+   * rides the class sync bundle, which holds every lesson in a class in one
+   * cached entry. A week's notes run to tens of KB, and a term of them would
+   * push that entry past what the cache will hold - at which point every sync
+   * becomes a Firestore query. Sections travel per lesson instead, with the
+   * material text (getStudentMaterial).
+   */
+  studentSections?: NoteSection[];
   classId: string;
   className: string;
   subjectId: string;
@@ -237,6 +312,8 @@ export interface GeneratedContent {
   questions: PracticeQuestion[];
   /** TUTOR-ONLY. Never include in a student response. */
   markingGuide: MarkingGuideEntry[];
+  /** Weekly notes only: the topic sections, as arranged and then as edited. */
+  sections?: NoteSection[];
   model: string;
   inputTokens: number;
   outputTokens: number;
@@ -261,6 +338,14 @@ export interface StudentPayload {
   questions: PracticeQuestion[];
   /** Resolved from topics/{topicId} at publish time so sync needs no topic read. */
   topicTitle: string;
+  /**
+   * Every topic this note covers, for the "By topic" shelf. One entry on a
+   * topic note; one per distinct section topic on a weekly note. Absent on
+   * guides published before 2026-10-02 - readers fall back to `topicTitle`.
+   */
+  topics?: NoteTopic[];
+  /** How many topic sections the lesson carries. The bodies live on the lesson. */
+  sectionCount?: number;
   /** Bumped on every publish/edit so a device knows its copy is stale. */
   revision: number;
 }
@@ -270,6 +355,16 @@ export interface SyncLesson {
   lessonId: string;
   title: string;
   topicTitle: string;
+  kind: NoteKind;
+  /** Week within the lesson's own term, or null. Never compare across terms. */
+  week: number | null;
+  /**
+   * Topic labels for the "By topic" view. Empty only on a weekly note whose
+   * topic sorting is not published yet; every topic note has at least one.
+   */
+  topics: NoteTopic[];
+  /** True when topic sections can be fetched with the lesson body. */
+  hasSections: boolean;
   subjectId: string;
   subjectName: string;
   hasMaterial: boolean;
@@ -309,6 +404,11 @@ export interface StudentLessonDetail {
   lessonId: string;
   title: string;
   topicTitle: string;
+  kind: NoteKind;
+  week: number | null;
+  topics: NoteTopic[];
+  /** Approved topic sections of a weekly note, or null. Published with the study guide. */
+  sections: NoteSection[] | null;
   /** Published lesson material (extractedText), or null when not published. */
   material: string | null;
   /** Original file download info - only when material is published AND a file exists. */

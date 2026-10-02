@@ -25,10 +25,13 @@ import { onSyncProgress, saveAllMaterials } from "@/lib/offline/sync";
 export default function DashboardView({
   photo,
   announcements,
+  search,
   shelf,
 }: {
   /** The child's passport photo card. A slot like the others; see StudentPhotoCard. */
   photo?: React.ReactNode;
+  /** Search across every subject's notes. A slot; see NoteSearch. */
+  search?: React.ReactNode;
   announcements?: React.ReactNode;
   shelf?: React.ReactNode;
 }) {
@@ -42,14 +45,14 @@ export default function DashboardView({
     const load = async () => {
       try {
         const [lessons, materials, meta] = await Promise.all([
-          getAll<{ lessonId: string; hasMaterial: boolean }>(STORE.lessons),
+          getAll<{ lessonId: string; hasMaterial: boolean; hasSections?: boolean }>(STORE.lessons),
           getAll<StoredMaterial>(STORE.materials),
           getMeta(),
         ]);
         if (!alive) return;
         const have = new Set(materials.map((m) => m.lessonId));
         setSavedAt(meta?.lastSyncAt ?? null);
-        setDownloadable(lessons.filter((l) => l.hasMaterial && !have.has(l.lessonId)).length);
+        setDownloadable(lessons.filter((l) => (l.hasMaterial || l.hasSections) && !have.has(l.lessonId)).length);
       } catch {
         // No device store (private mode, old browser). The page still works.
       }
@@ -70,11 +73,11 @@ export default function DashboardView({
     await saveAllMaterials((done, total) => setSaving({ done, total }));
     setSaving(null);
     const materials = await getAll<StoredMaterial>(STORE.materials).catch(() => []);
-    const lessons = await getAll<{ lessonId: string; hasMaterial: boolean }>(
+    const lessons = await getAll<{ lessonId: string; hasMaterial: boolean; hasSections?: boolean }>(
       STORE.lessons
     ).catch(() => []);
     const have = new Set(materials.map((m) => m.lessonId));
-    setDownloadable(lessons.filter((l) => l.hasMaterial && !have.has(l.lessonId)).length);
+    setDownloadable(lessons.filter((l) => (l.hasMaterial || l.hasSections) && !have.has(l.lessonId)).length);
   }
 
   return (
@@ -95,6 +98,8 @@ export default function DashboardView({
           today is worth more than a subject list, and it is the one thing on this
           screen a child did not come looking for. */}
       {announcements}
+
+      {search}
 
       {shelf}
 

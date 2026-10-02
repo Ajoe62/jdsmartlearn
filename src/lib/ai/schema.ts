@@ -18,7 +18,28 @@ export const generationSchema = z.object({
     .max(12),
 });
 
-export type GenerationResult = z.infer<typeof generationSchema>;
+/**
+ * A weekly note: the study guide PLUS how the week's paragraphs divide into
+ * topics. Paragraph NUMBERS only, never text - see lib/notes/arrange for why
+ * that is what keeps the tutor's words their own.
+ */
+export const weeklyGenerationSchema = generationSchema.extend({
+  sections: z
+    .array(
+      z.object({
+        heading: z.string().max(200),
+        topicNumber: z.number().int().min(0),
+        topicTitle: z.string().max(200),
+        paragraphs: z.array(z.number().int()).max(400),
+      })
+    )
+    .min(1)
+    .max(12),
+});
+
+export type GenerationResult = z.infer<typeof generationSchema> & {
+  sections?: z.infer<typeof weeklyGenerationSchema>["sections"];
+};
 
 /**
  * Validated shape of one grading call.
@@ -92,4 +113,26 @@ export const generationResponseSchema = {
     },
   },
   required: ["summary", "questions", "markingGuide"],
+} as const;
+
+/** The weekly variant, for native structured output. */
+export const weeklyGenerationResponseSchema = {
+  type: "object",
+  properties: {
+    ...generationResponseSchema.properties,
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          heading: { type: "string" },
+          topicNumber: { type: "integer" },
+          topicTitle: { type: "string" },
+          paragraphs: { type: "array", items: { type: "integer" } },
+        },
+        required: ["heading", "topicNumber", "topicTitle", "paragraphs"],
+      },
+    },
+  },
+  required: ["summary", "questions", "markingGuide", "sections"],
 } as const;

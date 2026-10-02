@@ -13,6 +13,7 @@ import TutorNotices from "@/components/tutor/TutorNotices";
 import { listLessonsForTutor, listLessonsForSchool } from "@/lib/db/lessons";
 import { getClassesByIds, getTutorNames, listClassesForSchool } from "@/lib/db/resultpeak";
 import { resultPeakUrl } from "@/lib/partner-links";
+import { weekLabel } from "@/lib/notes/group";
 import type { LessonStatus } from "@/types";
 
 /**
@@ -147,6 +148,9 @@ export default async function TutorDashboard() {
                     <div className="min-w-0">
                       <p className="truncate font-display font-semibold">{lesson.title}</p>
                       <p className="mt-1 text-sm text-muted">
+                        {typeof lesson.week === "number" && (
+                          <span className="font-medium text-brand">{weekLabel(lesson.week)} · </span>
+                        )}
                         {lesson.className}
                         {tutorNames?.get(lesson.tutorId) && (
                           <> · {tutorNames.get(lesson.tutorId)}</>

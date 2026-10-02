@@ -21,7 +21,8 @@ import {
 } from "@/lib/storage/file-types";
 import { readApiError } from "@/lib/upload-client";
 import { CLASS_LEVELS, LEVEL_LABELS } from "@/lib/class-level";
-import type { ClassLevel } from "@/types";
+import { weekLabel } from "@/lib/notes/group";
+import { MAX_WEEK, type ClassLevel, type NoteKind } from "@/types";
 
 type ClassOpt = { id: string; name: string; level?: ClassLevel };
 type SubjectOpt = { id: string; name: string };
@@ -51,6 +52,13 @@ export default function NewLessonForm({
   const [classId, setClassId] = useState("");
   const [subjectId, setSubjectId] = useState("");
   const [topicId, setTopicId] = useState("");
+  /**
+   * Weekly or topic note (owner's decision, 2026-10-02). A weekly note needs a
+   * week and no topic - the AI sorts it into topics and the tutor reviews them.
+   * A topic note needs a topic, and its week is optional.
+   */
+  const [noteKind, setNoteKind] = useState<NoteKind>("weekly");
+  const [week, setWeek] = useState<number | null>(null);
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<"paste" | "upload">("paste");
   const [text, setText] = useState("");
@@ -179,7 +187,19 @@ export default function NewLessonForm({
   const classGap = unmatchedState(unmatched, classId);
 
   const contentReady = mode === "paste" ? text.trim().length >= MIN_CHARS : !!upload;
-  const canSubmit = !!classId && !!subjectId && !!topicId && !!title.trim() && contentReady;
+  const weekly = noteKind === "weekly";
+  const placed = weekly ? week !== null : !!topicId;
+  const canSubmit = !!classId && !!subjectId && placed && !!title.trim() && contentReady;
+
+  function chooseWeek(raw: string) {
+    const next = raw ? Number(raw) : null;
+    setWeek(next);
+    // Prefill a weekly note's title, but let the tutor override it.
+    if (weekly && next !== null && (!title.trim() || /^Week \w+ .*notes$/.test(title))) {
+      const subjectName = subjects.find((s) => s.id === subjectId)?.name;
+      setTitle(`${weekLabel(next)} ${subjectName ? `${subjectName} ` : ""}notes`);
+    }
+  }
 
   // Tell the tutor exactly what's missing instead of a silently disabled button.
   const missing: string[] = [];
@@ -187,7 +207,8 @@ export default function NewLessonForm({
   if (!subjectId) {
     missing.push(classGap === "blocked" ? "choose a class you have subjects in" : "choose a subject");
   }
-  if (!topicId) missing.push("choose a topic");
+  if (weekly && week === null) missing.push("choose a week");
+  if (!weekly && !topicId) missing.push("choose a topic");
   if (!title.trim()) missing.push("add a title");
   if (!contentReady) {
     missing.push(
@@ -207,8 +228,11 @@ export default function NewLessonForm({
       target: newLocalId(),
       title: title.trim(),
       classId,
-      topicId,
+      topicId: weekly ? "" : topicId,
       text,
+      noteKind,
+      week,
+      ...(weekly ? { subjectId } : {}),
     });
   }
 
@@ -233,7 +257,10 @@ export default function NewLessonForm({
     try {
       const form = new FormData();
       form.set("classId", classId);
-      form.set("topicId", topicId);
+      form.set("kind", noteKind);
+      if (weekly) form.set("subjectId", subjectId);
+      else form.set("topicId", topicId);
+      if (week !== null) form.set("week", String(week));
       form.set("title", title.trim());
       if (mode === "paste") {
         form.set("text", text);
@@ -283,6 +310,29 @@ export default function NewLessonForm({
           and you can create the study materials then.
         </Callout>
       )}
+
+      {/* Step zero: what kind of note. Weekly first - it is how most schools
+          here hand out notes, and the AI does the sorting by topic. */}
+      <Card>
+        <CardHeader title="What are you uploading?" />
+        <div className="grid gap-2.5 p-4 sm:grid-cols-2" role="radiogroup" aria-label="Kind of note">
+          <KindOption
+            active={weekly}
+            onClick={() => {
+              setNoteKind("weekly");
+              setTopicId("");
+            }}
+            title="Weekly notes"
+            detail="One week's notes. We sort them into topics for you to check."
+          />
+          <KindOption
+            active={!weekly}
+            onClick={() => setNoteKind("topic")}
+            title="Topic notes"
+            detail="Notes on one topic, like Fractions or Figures of speech."
+          />
+        </div>
+      </Card>
 
       {/* Step one: where the lesson goes. Kept apart from the lesson itself so a
           teacher doing this for the first time meets three short questions
@@ -345,6 +395,34 @@ export default function NewLessonForm({
             <UnmatchedClassNote classLabel={selectedClass.name} state={classGap} noun="lessons" />
           )}
 
+          <Field
+            label={weekly ? "Week" : "Week (optional)"}
+            htmlFor="lesson-week"
+          >
+            <select
+              id="lesson-week"
+              value={week ?? ""}
+              onChange={(e) => chooseWeek(e.target.value)}
+              className={CONTROL}
+            >
+              <option value="">{weekly ? "Choose a week" : "No particular week"}</option>
+              {Array.from({ length: MAX_WEEK }, (_, i) => i + 1).map((w) => (
+                <option key={w} value={w}>
+                  {weekLabel(w)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {weekly && (
+            <p className="-mt-2 text-sm text-muted">
+              Weeks start again at Week One each term.
+            </p>
+          )}
+
+          {/* A weekly note has no topic of its own: the AI sorts it into
+              topics after it is created, and the tutor checks the result. */}
+          {!weekly && (
+          <>
           <Field label="Topic" htmlFor="lesson-topic">
             <select
               id="lesson-topic"
@@ -457,6 +535,8 @@ export default function NewLessonForm({
               </div>
             </div>
           )}
+          </>
+          )}
         </div>
       </Card>
 
@@ -470,7 +550,7 @@ export default function NewLessonForm({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Introduction to fractions"
+              placeholder={weekly ? "e.g. Week One Mathematics notes" : "e.g. Introduction to fractions"}
               className={CONTROL}
             />
           </Field>
@@ -561,6 +641,37 @@ export default function NewLessonForm({
         )}
       </div>
     </div>
+  );
+}
+
+/** One of the two note kinds - a large target with a line saying what it means. */
+function KindOption({
+  active,
+  onClick,
+  title,
+  detail,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      className={
+        "min-h-[44px] rounded-xl border-2 px-4 py-3 text-left transition-colors " +
+        (active ? "border-brand bg-brandSoft" : "border-line bg-surface hover:border-lineStrong")
+      }
+    >
+      <span className={"block font-display font-semibold " + (active ? "text-brand" : "text-ink")}>
+        {title}
+      </span>
+      <span className="mt-0.5 block text-sm text-muted">{detail}</span>
+    </button>
   );
 }
 

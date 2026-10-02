@@ -21,7 +21,8 @@
     "refresh:class-names": "tsx scripts/refresh-class-names.ts",
     "report:purge": "tsx scripts/purge-report.ts",
     "list:tutors": "tsx scripts/list-tutors.ts",
-    "list:students": "tsx scripts/list-students.ts"
+    "list:students": "tsx scripts/list-students.ts",
+    "test:notes": "tsx --test scripts/test-notes.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1093.0",

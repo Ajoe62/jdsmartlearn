@@ -3,6 +3,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { CONTROL } from "@/components/ui/Field";
+import { weekLabel } from "@/lib/notes/group";
+import { MAX_WEEK } from "@/types";
 
 /**
  * Edit title + material after creation; admins can also move the lesson to a
@@ -13,6 +15,8 @@ export default function EditLessonSection({
   initialTitle,
   initialText,
   initialClassId,
+  initialWeek,
+  weekly,
   hasStudyGuide,
   anythingPublished,
   classes,
@@ -21,6 +25,9 @@ export default function EditLessonSection({
   initialTitle: string;
   initialText: string;
   initialClassId: string;
+  initialWeek: number | null;
+  /** A weekly note must keep a week; a topic note may clear it. */
+  weekly: boolean;
   hasStudyGuide: boolean;
   anythingPublished: boolean;
   /** Only provided for admins - presence of >1 option enables the class mover. */
@@ -31,6 +38,7 @@ export default function EditLessonSection({
   const [title, setTitle] = useState(initialTitle);
   const [text, setText] = useState(initialText);
   const [classId, setClassId] = useState(initialClassId);
+  const [week, setWeek] = useState<number | null>(initialWeek);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -46,7 +54,13 @@ export default function EditLessonSection({
     const res = await fetch(`/api/lessons/${lessonId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, extractedText: text, classId }),
+      body: JSON.stringify({
+        title,
+        extractedText: text,
+        classId,
+        // Sent only when changed, so an older lesson is never stamped by accident.
+        ...(week !== initialWeek ? { week } : {}),
+      }),
     });
     const body = await res.json().catch(() => ({}));
     setBusy(false);
@@ -87,6 +101,22 @@ export default function EditLessonSection({
           onChange={(e) => setTitle(e.target.value)}
           className={CONTROL}
         />
+      </label>
+
+      <label className="mt-4 block">
+        <span className="text-sm font-medium">Week</span>
+        <select
+          value={week ?? ""}
+          onChange={(e) => setWeek(e.target.value ? Number(e.target.value) : null)}
+          className={CONTROL}
+        >
+          {!weekly && <option value="">No particular week</option>}
+          {Array.from({ length: MAX_WEEK }, (_, i) => i + 1).map((w) => (
+            <option key={w} value={w}>
+              {weekLabel(w)}
+            </option>
+          ))}
+        </select>
       </label>
 
       {canMoveClass && (

@@ -10,6 +10,8 @@ import {
 import {
   generationSchema,
   generationResponseSchema,
+  weeklyGenerationSchema,
+  weeklyGenerationResponseSchema,
   gradingSchema,
   gradingResponseSchema,
 } from "./schema";
@@ -35,10 +37,12 @@ export async function generateWithGemini(input: PromptInput): Promise<Generation
     systemInstruction: system,
     generationConfig: {
       responseMimeType: "application/json",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      responseSchema: generationResponseSchema as any,
+      responseSchema: (input.weekly
+        ? weeklyGenerationResponseSchema
+        : generationResponseSchema) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
     },
   });
+  const schema = input.weekly ? weeklyGenerationSchema : generationSchema;
 
   const started = Date.now();
   const attempt = async () => {
@@ -56,12 +60,12 @@ export async function generateWithGemini(input: PromptInput): Promise<Generation
   };
 
   let raw = await attempt();
-  let parsed = generationSchema.safeParse(safeJson(raw.text));
+  let parsed = schema.safeParse(safeJson(raw.text));
 
   if (!parsed.success) {
     // One retry, per CLAUDE.md, then surface a friendly error upstream.
     raw = await attempt();
-    parsed = generationSchema.safeParse(safeJson(raw.text));
+    parsed = schema.safeParse(safeJson(raw.text));
   }
 
   if (!parsed.success) {

@@ -3,8 +3,9 @@ import { getStudentSession } from "@/lib/auth/student";
 import { getStudentMaterial } from "@/lib/db/student-content";
 
 /**
- * Published material text for one lesson, so a device can save it for offline
- * reading.
+ * One lesson's published body - material text and, on a weekly note, its topic
+ * sections - so a device can save it for offline reading. Each half is null
+ * unless its own publish switch is on (getStudentMaterial).
  *
  * Kept out of the sync bundle deliberately: extractedText runs to 800 KB, and
  * 200 of them would exhaust the function's memory. Cached per lesson, so a whole
@@ -18,14 +19,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
   }
 
-  // Returns null for another class's lesson, or one whose material is unpublished.
+  // Null for another class's lesson, or one with neither half published.
   const material = await getStudentMaterial(session.schoolId, session.classId, id);
   if (!material) {
     return NextResponse.json({ error: "Lesson not found." }, { status: 404 });
   }
 
   return NextResponse.json(
-    { lessonId: id, text: material.text, revision: material.revision },
+    {
+      lessonId: id,
+      text: material.text,
+      sections: material.sections,
+      revision: material.revision,
+    },
     { headers: { "Cache-Control": "private, no-store" } }
   );
 }

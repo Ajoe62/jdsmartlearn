@@ -6,28 +6,55 @@ import { Button } from "@/components/ui/Button";
 import Callout from "@/components/ui/Callout";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { CONTROL } from "@/components/ui/Field";
-import type { LessonStatus } from "@/types";
+import type { LessonStatus, NoteSection } from "@/types";
+import SectionsEditor from "./SectionsEditor";
 
 type Question = { number: number; question: string };
 type Guide = { number: number; keyPoints: string[] };
-type Content = { summary: string; questions: Question[]; markingGuide: Guide[] };
+type Content = {
+  summary: string;
+  questions: Question[];
+  markingGuide: Guide[];
+  /** Weekly notes only. */
+  sections?: NoteSection[];
+};
 
 export default function ReviewLesson({
   lessonId,
   status,
   canGenerate,
   content,
+  weekly = false,
+  topicOptions = [],
 }: {
   lessonId: string;
   status: LessonStatus;
   /** False when the lesson has too little text - a scan or slides with no text layer. */
   canGenerate: boolean;
   content: Content | null;
+  /** A weekly note: generation also sorts it into topic sections. */
+  weekly?: boolean;
+  /** This subject's topics, for the section topic pickers. */
+  topicOptions?: { id: string; title: string }[];
 }) {
   if (!content) {
-    return <GeneratePanel lessonId={lessonId} status={status} canGenerate={canGenerate} />;
+    return (
+      <GeneratePanel
+        lessonId={lessonId}
+        status={status}
+        canGenerate={canGenerate}
+        weekly={weekly}
+      />
+    );
   }
-  return <ReviewPanel lessonId={lessonId} status={status} content={content} />;
+  return (
+    <ReviewPanel
+      lessonId={lessonId}
+      status={status}
+      content={content}
+      topicOptions={topicOptions}
+    />
+  );
 }
 
 /** Shown before study materials exist (draft), or if a generation was interrupted. */
@@ -35,10 +62,12 @@ function GeneratePanel({
   lessonId,
   status,
   canGenerate,
+  weekly,
 }: {
   lessonId: string;
   status: LessonStatus;
   canGenerate: boolean;
+  weekly: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -74,10 +103,17 @@ function GeneratePanel({
             Create the study materials
           </p>
           <p className="mt-1 text-sm text-muted">
-            From this lesson, you&rsquo;ll get three things back in about a minute.
+            From this lesson, you&rsquo;ll get {weekly ? "four" : "three"} things back in
+            about a minute.
           </p>
         </div>
         <ul className="divide-y divide-line">
+          {weekly && (
+            <WhatYouGet
+              title="Your notes sorted by topic"
+              detail="In your own words. Only the order and the topic headings are new."
+            />
+          )}
           <WhatYouGet
             title="A student summary"
             detail="Written for the reading level of this class."
@@ -139,10 +175,12 @@ function ReviewPanel({
   lessonId,
   status,
   content,
+  topicOptions,
 }: {
   lessonId: string;
   status: LessonStatus;
   content: Content;
+  topicOptions: { id: string; title: string }[];
 }) {
   const router = useRouter();
   const [summary, setSummary] = useState(content.summary);
@@ -151,6 +189,7 @@ function ReviewPanel({
   const [guides, setGuides] = useState(
     content.markingGuide.map((g) => ({ number: g.number, text: g.keyPoints.join("\n") }))
   );
+  const [sections, setSections] = useState<NoteSection[] | undefined>(content.sections);
   const [busy, setBusy] = useState<false | "generate" | "publish" | "unpublish">(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -195,12 +234,15 @@ function ReviewPanel({
       summary?: string;
       questions?: Question[];
       markingGuide?: Guide[];
+      sections?: NoteSection[];
     } = {};
     if (summary !== content.summary) body.summary = summary;
     if (JSON.stringify(nextQuestions) !== JSON.stringify(content.questions))
       body.questions = nextQuestions;
     if (JSON.stringify(nextGuide) !== JSON.stringify(content.markingGuide))
       body.markingGuide = nextGuide;
+    if (sections && JSON.stringify(sections) !== JSON.stringify(content.sections))
+      body.sections = sections;
 
     try {
       const res = await fetch(`/api/lessons/${lessonId}/publish`, {
@@ -218,7 +260,7 @@ function ReviewPanel({
   }
 
   async function regenerate() {
-    if (!window.confirm("Create fresh study materials? This replaces the current summary, questions, and marking guide, including your edits.")) {
+    if (!window.confirm(`Create fresh study materials? This replaces the current summary, questions${sections ? ", topic sections" : ""} and marking guide, including your edits.`)) {
       return;
     }
     setBusy("generate");
@@ -254,6 +296,10 @@ function ReviewPanel({
           Read every section and fix anything that is wrong for your class. Nothing reaches
           your students until you publish.
         </Callout>
+      )}
+
+      {sections && (
+        <SectionsEditor sections={sections} onChange={setSections} topicOptions={topicOptions} />
       )}
 
       <Card>

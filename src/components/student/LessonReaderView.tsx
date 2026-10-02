@@ -12,7 +12,8 @@ import { saveMaterial } from "@/lib/offline/sync";
 import { recordView } from "@/lib/offline/outbox";
 import { isFileSaved, saveFile } from "@/lib/offline/files";
 import { formatBytes } from "@/lib/format";
-import type { StudentLessonDetail } from "@/types";
+import { toNoteRow, topicAnchor, weekLabel } from "@/lib/notes/group";
+import type { NoteSection, StudentLessonDetail } from "@/types";
 
 /**
  * One lesson, rendered by BOTH paths:
@@ -112,8 +113,9 @@ export default function LessonReaderView({
             });
           }
           // Saved even when empty: "published, but it's a file" must survive
-          // going offline as itself, not as "not saved yet".
-          if (initial.material !== null) {
+          // going offline as itself, not as "not saved yet". A weekly note's
+          // topic sections are saved in the same row.
+          if (initial.material !== null || initial.sections) {
             const existing = await get<StoredMaterial>(STORE.materials, lessonId);
             if (!existing) void saveMaterial(lessonId);
           }
@@ -152,10 +154,16 @@ export default function LessonReaderView({
         setRevision(stored.updatedAt);
         setUnsavedFile(stored.file && !haveFile ? stored.file : null);
 
+        const row = toNoteRow(stored);
         setLesson({
           lessonId,
           title: stored.title,
           topicTitle: stored.topicTitle,
+          kind: row.kind,
+          week: row.week,
+          topics: row.topics,
+          // Only while the guide is still published - sections go with it.
+          sections: stored.hasSections ? (material?.sections ?? null) : null,
           material: material?.text ?? null,
           file: haveFile ? stored.file : null,
           studyGuide: stored.studyGuide,
@@ -170,6 +178,17 @@ export default function LessonReaderView({
       alive = false;
     };
   }, [lessonId, initial]);
+
+  /**
+   * "By topic" links straight to a section (`#t-fractions`). The browser only
+   * jumps on its own when the section is in the first HTML, which the offline
+   * path never is - so jump once the lesson has rendered.
+   */
+  useEffect(() => {
+    if (state !== "ready" || !window.location.hash) return;
+    const el = document.getElementById(decodeURIComponent(window.location.hash.slice(1)));
+    el?.scrollIntoView();
+  }, [state]);
 
   if (state === "loading") {
     return (
@@ -192,15 +211,47 @@ export default function LessonReaderView({
     );
   }
 
-  const hasNothing = lesson.material === null && !lesson.studyGuide;
+  const hasNothing = lesson.material === null && !lesson.studyGuide && !lesson.sections;
+  const sections = lesson.sections;
+  const showTopics =
+    lesson.topics.length > 0 &&
+    (lesson.kind === "weekly" || lesson.topics.some((t) => t.title !== lesson.title));
 
   return (
     <main className="mx-auto max-w-readable px-5 py-8">
       <BackToSubjects />
-      <h1 className="mt-4 text-title">{lesson.title}</h1>
-      {lesson.topicTitle && lesson.topicTitle !== lesson.title && (
-        <p className="mt-1.5 text-muted">{lesson.topicTitle}</p>
+
+      {(lesson.week !== null || lesson.kind === "weekly") && (
+        <p className="mt-4 text-eyebrow font-semibold uppercase text-brand">
+          {weekLabel(lesson.week)}
+          {lesson.kind === "weekly" && " study notes"}
+        </p>
       )}
+      <h1 className={lesson.week !== null || lesson.kind === "weekly" ? "mt-1 text-title" : "mt-4 text-title"}>
+        {lesson.title}
+      </h1>
+      {showTopics && (
+        <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Topics in this note">
+          {lesson.topics.map((t) => (
+            <li key={t.title}>
+              {sections ? (
+                <a
+                  href={`#${topicAnchor(t.title)}`}
+                  className="inline-flex min-h-[32px] items-center rounded-full bg-accentSoft px-3 text-xs font-medium text-accentText hover:underline"
+                >
+                  {t.title}
+                </a>
+              ) : (
+                <span className="inline-flex min-h-[32px] items-center rounded-full bg-accentSoft px-3 text-xs font-medium text-accentText">
+                  {t.title}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {sections && <TopicSections sections={sections} />}
 
       {hasNothing && (
         <Callout tone="neutral" className="mt-6" title="The rest of this lesson isn't saved yet">
@@ -210,7 +261,7 @@ export default function LessonReaderView({
 
       {lesson.material !== null && (
         <section className="mt-8">
-          <h2 className="text-heading">Lesson material</h2>
+          <h2 className="text-heading">{sections ? "The whole note" : "Lesson material"}</h2>
 
           {lesson.file && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -256,7 +307,19 @@ export default function LessonReaderView({
           )}
 
           {lesson.material ? (
-            <article className="prose-lesson mt-4 whitespace-pre-wrap">{lesson.material}</article>
+            sections ? (
+              /* The same words as the sections above, in the teacher's order.
+                 Folded away so a child reading by topic does not scroll past it
+                 twice. */
+              <details className="mt-3 rounded-xl border border-line bg-surface p-4">
+                <summary className="min-h-[44px] cursor-pointer py-2.5 text-sm font-medium text-accentText">
+                  Read it as your teacher wrote it
+                </summary>
+                <article className="prose-lesson mt-2 whitespace-pre-wrap">{lesson.material}</article>
+              </details>
+            ) : (
+              <article className="prose-lesson mt-4 whitespace-pre-wrap">{lesson.material}</article>
+            )
           ) : (
             lesson.file && (
               <p className="mt-4 text-muted">
@@ -291,6 +354,46 @@ export default function LessonReaderView({
         </section>
       )}
     </main>
+  );
+}
+
+/**
+ * A weekly note, by topic. Each section has an anchor so "By topic" on the
+ * subject page lands on it. The words are the teacher's own - the AI only chose
+ * which paragraphs go under which topic, and the teacher approved it.
+ */
+function TopicSections({ sections }: { sections: NoteSection[] }) {
+  const seen = new Set<string>();
+  return (
+    <section className="mt-8" aria-labelledby="by-topic-heading">
+      <h2 id="by-topic-heading" className="text-heading">
+        Notes by topic
+      </h2>
+      <div className="mt-4 space-y-4">
+        {sections.map((s, i) => {
+          // The first section on a topic carries its anchor; a second one on the
+          // same topic follows it without stealing the jump.
+          const anchor = topicAnchor(s.topicTitle);
+          const id = seen.has(anchor) ? undefined : anchor;
+          seen.add(anchor);
+          return (
+            <article
+              key={i}
+              id={id}
+              className="scroll-mt-4 overflow-hidden rounded-xl border border-line bg-surface shadow-card"
+            >
+              <header className="border-l-4 border-l-brand bg-brandSoft px-4 py-3">
+                <p className="text-eyebrow font-semibold uppercase text-brand">{s.topicTitle}</p>
+                {s.heading !== s.topicTitle && (
+                  <h3 className="mt-0.5 font-display text-subheading font-semibold">{s.heading}</h3>
+                )}
+              </header>
+              <div className="prose-lesson whitespace-pre-wrap px-4 py-4">{s.body}</div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

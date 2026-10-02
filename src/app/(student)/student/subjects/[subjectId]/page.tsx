@@ -5,6 +5,7 @@ import { listPublishedSchemesForClass } from "@/lib/db/schemes";
 import { buildAssignmentList } from "@/lib/db/submissions";
 import { getSubjects } from "@/lib/db/resultpeak";
 import SubjectDetailView from "@/components/student/SubjectDetailView";
+import { toNoteRow } from "@/lib/notes/group";
 
 /**
  * One subject's page.
@@ -58,14 +59,7 @@ export default async function SubjectPage({
     <SubjectDetailView
       subjectId={subjectId}
       subjectName={subjectName}
-      initialLessons={lessons.map((l) => ({
-        lessonId: l.lessonId,
-        title: l.title,
-        hasMaterial: l.hasMaterial,
-        hasStudyGuide: l.hasStudyGuide,
-        term: l.term,
-        session: l.session,
-      }))}
+      initialLessons={lessons.map(toNoteRow)}
       initialSchemes={mySchemes.map((s) => ({
         schemeId: s.id,
         title: s.title,

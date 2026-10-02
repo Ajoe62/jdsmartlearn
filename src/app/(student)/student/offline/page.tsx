@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Announcements from "@/components/student/Announcements";
 import DashboardView from "@/components/student/DashboardView";
 import LessonReaderView from "@/components/student/LessonReaderView";
+import NoteSearch from "@/components/student/NoteSearch";
 import SchemeReaderView from "@/components/student/SchemeReaderView";
 import SubjectDetailView from "@/components/student/SubjectDetailView";
 import SubjectShelfView from "@/components/student/SubjectShelfView";
@@ -114,6 +115,8 @@ export default function OfflineShell() {
       // the device store on mount, like every other slot here.
       photo={<StudentPhotoCard />}
       announcements={<Announcements initial={[]} initialReadState={EMPTY_READ_STATE} />}
+      // Searches the phone's own copy; nothing is baked into this shared HTML.
+      search={<NoteSearch initial={[]} label="Search notes and topics" />}
       shelf={
         <SubjectShelfView
           initial={[]}

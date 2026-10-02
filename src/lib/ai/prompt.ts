@@ -67,6 +67,13 @@ export interface PromptInput {
   subjectName: string;
   topicTitle: string;
   level: ClassLevel;
+  /**
+   * Set for a weekly note. `lessonText` is then the NUMBERED paragraphs from
+   * lib/notes/arrange, and the model also says which paragraphs belong to which
+   * topic. `topics` is the school's own curriculum topic titles for this subject
+   * and level - curriculum, not personal data.
+   */
+  weekly?: { week: number | null; topics: string[] };
 }
 
 /**
@@ -74,7 +81,7 @@ export interface PromptInput {
  * Never add student names, ids, tutor names, or school names - the free tier
  * permits the provider to use submitted content. See CLAUDE.md.
  */
-export function buildPrompt({ lessonText, subjectName, topicTitle, level }: PromptInput) {
+export function buildPrompt({ lessonText, subjectName, topicTitle, level, weekly }: PromptInput) {
   const band = bandFor(level);
   const curriculum = curriculumFor(level);
 
@@ -87,9 +94,33 @@ export function buildPrompt({ lessonText, subjectName, topicTitle, level }: Prom
     `Every question must be answerable from the lesson text alone. Never invent facts that are not in the lesson.`,
     `The marking guide gives the key points a teacher would accept for each question, not a single verbatim answer.`,
     `Use Nigerian examples and context where they fit naturally. British English spelling.`,
+    ...(weekly ? weeklyInstructions(weekly.topics) : []),
   ].join("\n");
 
   return { system, user: `LESSON TEXT:\n\n${lessonText}` };
+}
+
+/**
+ * The arranging half of a weekly note.
+ *
+ * The model answers with paragraph NUMBERS. It is told not to copy text, but
+ * the guarantee does not rest on it obeying: the bodies are rebuilt from the
+ * tutor's paragraphs whatever it returns (lib/notes/arrange).
+ */
+function weeklyInstructions(topics: string[]): string[] {
+  const list = topics.length
+    ? topics.map((t, i) => `${i + 1}. ${t}`).join("\n")
+    : "(none listed)";
+  return [
+    ``,
+    `This lesson text is one WEEK of a teacher's notes and may cover several topics. Its paragraphs are numbered [1], [2], and so on.`,
+    `Also return "sections": divide the paragraphs into topics. Every paragraph number belongs to exactly one section; keep a topic's paragraphs together in one section.`,
+    `For each section give: "paragraphs" (the paragraph numbers), "heading" (a short heading, at most 8 words), "topicNumber" and "topicTitle".`,
+    `Match each section to one of the school's topics below and set "topicNumber" to its number and "topicTitle" to its title. Only if none fits, set "topicNumber" to 0 and "topicTitle" to a short topic name.`,
+    `Do NOT copy, rewrite or summarise the teacher's text in sections. Return paragraph numbers only.`,
+    `The summary and questions still cover the whole week. Do not mention the paragraph numbers in them.`,
+    `School's topics for this subject and class:\n${list}`,
+  ];
 }
 
 export const MAX_LESSON_CHARS = 30_000;

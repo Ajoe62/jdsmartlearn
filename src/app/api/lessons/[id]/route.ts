@@ -9,7 +9,8 @@ import { getLesson, deleteLesson, updateLessonDetails, writeAuditLog } from "@/l
 import { getClassesByIds } from "@/lib/db/resultpeak";
 import { studentLessonsTag, lessonViewTag } from "@/lib/db/student-content";
 import { deleteFile } from "@/lib/storage/provider";
-import type { Lesson } from "@/types";
+import { parseWeek } from "@/lib/notes/arrange";
+import { MAX_WEEK, type Lesson } from "@/types";
 
 const MAX_TEXT_CHARS = 800_000;
 
@@ -41,6 +42,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     title?: string;
     extractedText?: string;
     classId?: string;
+    /** 1..MAX_WEEK, or null to clear it on a topic note. */
+    week?: number | null;
     baseUpdatedAt?: number;
   };
 
@@ -65,7 +68,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     );
   }
 
-  const patch: Partial<Pick<Lesson, "title" | "extractedText" | "classId" | "className">> = {};
+  const patch: Partial<
+    Pick<Lesson, "title" | "extractedText" | "classId" | "className" | "week">
+  > = {};
   const changed: string[] = [];
 
   if (body.title !== undefined) {
@@ -99,6 +104,21 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (text !== lesson.extractedText) {
       patch.extractedText = text;
       changed.push("material");
+    }
+  }
+
+  if (body.week !== undefined) {
+    const week = parseWeek(body.week, MAX_WEEK);
+    if (week === undefined) {
+      return NextResponse.json({ error: `Choose a week from 1 to ${MAX_WEEK}.` }, { status: 400 });
+    }
+    // A weekly note without a week would have nowhere to show on "By week".
+    if (week === null && lesson.kind === "weekly") {
+      return NextResponse.json({ error: "A weekly note needs a week." }, { status: 400 });
+    }
+    if (week !== (lesson.week ?? null)) {
+      patch.week = week;
+      changed.push("week");
     }
   }
 

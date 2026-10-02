@@ -8,7 +8,10 @@ import {
 } from "@/lib/auth/tutor";
 import { getLesson, getGeneratedContent } from "@/lib/db/lessons";
 import { countLessonReaders } from "@/lib/db/lesson-views";
-import { listClassesForSchool } from "@/lib/db/resultpeak";
+import { getClassesByIds, listClassesForSchool } from "@/lib/db/resultpeak";
+import { listTopics } from "@/lib/db/topics";
+import { classLevel } from "@/lib/class-level";
+import { weekLabel } from "@/lib/notes/group";
 import { MIN_USABLE_CHARS } from "@/lib/extract/text";
 import { formatBytes } from "@/lib/format";
 import ReviewLesson from "./ReviewLesson";
@@ -43,14 +46,27 @@ export default async function LessonReviewPage({
   }
 
   const anythingPublished = lesson.status === "published" || !!lesson.materialPublishedAt;
-  const [content, readers, adminClasses] = await Promise.all([
+  const weekly = lesson.kind === "weekly";
+  const [content, readers, adminClasses, topics, [cls]] = await Promise.all([
     getGeneratedContent(id),
     anythingPublished
       ? countLessonReaders(id, session.schoolId)
       : Promise.resolve(0),
     // Only admins may move a lesson between classes; tutors get no options.
     session.isAdmin ? listClassesForSchool(session.schoolId) : Promise.resolve([]),
+    // A weekly note's section topic pickers. One bounded query, weekly only.
+    weekly ? listTopics(session.schoolId) : Promise.resolve([]),
+    weekly ? getClassesByIds([lesson.classId]) : Promise.resolve([]),
   ]);
+
+  /**
+   * This subject's topics, at the class's level when it is known - the same
+   * narrowing generation used, so the pickers offer what the AI chose from.
+   */
+  const level = cls ? classLevel(cls) : undefined;
+  const topicOptions = topics
+    .filter((t) => t.subjectId === lesson.subjectId && (!level || t.level === level))
+    .map((t) => ({ id: t.id, title: t.title }));
 
   /**
    * A lesson made from a scan, a slide deck or a photo has no text (owner's
@@ -64,7 +80,15 @@ export default async function LessonReviewPage({
       <Link href="/tutor" className="text-sm text-muted">
         ← Your lessons
       </Link>
-      <h1 className="mt-3 text-title">{lesson.title}</h1>
+      {(weekly || typeof lesson.week === "number") && (
+        <p className="mt-3 text-eyebrow font-semibold uppercase text-brand">
+          {weekLabel(lesson.week ?? null)}
+          {weekly && " · weekly notes"}
+        </p>
+      )}
+      <h1 className={weekly || typeof lesson.week === "number" ? "mt-1 text-title" : "mt-3 text-title"}>
+        {lesson.title}
+      </h1>
       <p className="mt-1 text-sm text-muted">
         {lesson.className}
         {anythingPublished && (
@@ -96,6 +120,8 @@ export default async function LessonReviewPage({
         initialTitle={lesson.title}
         initialText={lesson.extractedText}
         initialClassId={lesson.classId}
+        initialWeek={lesson.week ?? null}
+        weekly={weekly}
         hasStudyGuide={!!content}
         anythingPublished={anythingPublished}
         classes={adminClasses.map((c) => ({ id: c.id, name: c.name }))}
@@ -114,8 +140,9 @@ export default async function LessonReviewPage({
 
       <h2 className="mt-10 text-heading">Study guide</h2>
       <p className="mt-1 text-sm text-muted">
-        AI summary and practice questions, generated from the material. Publishes
-        separately from the material above.
+        {weekly
+          ? "Your notes sorted by topic, plus an AI summary and practice questions. Publishes separately from the material above."
+          : "AI summary and practice questions, generated from the material. Publishes separately from the material above."}
       </p>
       <ReviewLesson
         lessonId={lesson.id}
@@ -127,9 +154,12 @@ export default async function LessonReviewPage({
                 summary: content.summary,
                 questions: content.questions,
                 markingGuide: content.markingGuide,
+                sections: content.sections,
               }
             : null
         }
+        weekly={weekly}
+        topicOptions={topicOptions}
       />
 
       <DeleteLesson lessonId={lesson.id} lessonTitle={lesson.title} />

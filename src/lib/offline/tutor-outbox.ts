@@ -229,6 +229,9 @@ async function sendCreate(op: CreateOp): Promise<SendResult> {
   form.set("classId", op.classId);
   form.set("topicId", op.topicId);
   form.set("text", op.text);
+  if (op.noteKind) form.set("kind", op.noteKind);
+  if (typeof op.week === "number") form.set("week", String(op.week));
+  if (op.subjectId) form.set("subjectId", op.subjectId);
   if (op.publishMaterial) form.set("publishMaterial", "true");
 
   const res = await fetch("/api/lessons", {
