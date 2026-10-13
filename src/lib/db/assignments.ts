@@ -55,6 +55,38 @@ export async function listAssignmentsForTutor(schoolId: string, tutorId: string)
 }
 
 /**
+ * Assignments in ONE class, active or not, for the class -> subject view.
+ * Equality filters only, no orderBy: needs NO composite index whichever are set.
+ *
+ * `markingGuide` is left out by `.select()` - this list never shows it, so it
+ * has no reason to be read. `tutorId` narrows a teacher to their own work;
+ * admins pass none and see the class's.
+ */
+export async function listAssignmentsInClass(filter: {
+  schoolId: string;
+  classId: string;
+  tutorId?: string;
+  subjectId?: string;
+}): Promise<Assignment[]> {
+  let q = adminDb
+    .collection(JD.assignments)
+    .where("schoolId", "==", filter.schoolId)
+    .where("classId", "==", filter.classId);
+  if (filter.tutorId) q = q.where("tutorId", "==", filter.tutorId);
+  if (filter.subjectId) q = q.where("subjectId", "==", filter.subjectId);
+  const snap = await q
+    .select(
+      "classId", "className", "subjectId", "subjectName", "tutorId", "title",
+      "type", "dueDate", "maxMarks", "term", "session", "isActive", "updatedAt"
+    )
+    .limit(QUERY_LIMIT)
+    .get();
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Assignment)
+    .sort((a, b) => b.dueDate - a.dueDate);
+}
+
+/**
  * Active assignments a class can see. Three equality filters, no orderBy.
  *
  * Returns the FULL documents, marking guide included, so every caller on a

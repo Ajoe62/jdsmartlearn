@@ -175,7 +175,11 @@ self.addEventListener("fetch", (event) => {
      * surface rather than something they need on a dead link.
      */
     if (url.pathname === "/tutor" || url.pathname === "/tutor/lessons/new") {
-      event.respondWith(networkThenCache(request, SHELL));
+      // Saved under the path alone. A subject page's "Add notes" opens
+      // /tutor/lessons/new?class=..&subject=..&week=.., and the form reads those
+      // on the phone, so every such link is the same page - and must find the
+      // one saved copy when there is no signal.
+      event.respondWith(networkThenCache(request, SHELL, url.origin + url.pathname));
       return;
     }
 
@@ -253,16 +257,16 @@ async function shellFirst(request) {
   }
 }
 
-async function networkThenCache(request, cacheName) {
+async function networkThenCache(request, cacheName, key) {
   try {
     const res = await fetch(request);
     if (res.ok) {
       const cache = await caches.open(cacheName);
-      void cache.put(request, res.clone());
+      void cache.put(key || request, res.clone());
     }
     return res;
   } catch {
-    const cached = await caches.match(request);
+    const cached = await caches.match(key || request);
     if (cached) return cached;
     return new Response(offlineHtml(), {
       status: 200,

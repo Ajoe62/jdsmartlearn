@@ -57,6 +57,8 @@ export default function NewAssignmentForm({
   defaultSession,
   knownSessions,
   filesAvailable,
+  prefill,
+  returnTo,
 }: {
   classes: ClassOpt[];
   subjects: SubjectOpt[];
@@ -71,10 +73,14 @@ export default function NewAssignmentForm({
   /** The only sessions this school may pick. Never a free-text input. */
   knownSessions: string[];
   filesAvailable: boolean;
+  /** Class and subject from a subject page's "New assignment", already checked. */
+  prefill?: { classId: string; subjectId: string };
+  /** The subject page to return to after saving, when opened from one. */
+  returnTo?: string | null;
 }) {
   const router = useRouter();
-  const [classId, setClassId] = useState("");
-  const [subjectId, setSubjectId] = useState("");
+  const [classId, setClassId] = useState(prefill?.classId ?? "");
+  const [subjectId, setSubjectId] = useState(prefill?.subjectId ?? "");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<AssignmentType>("written");
@@ -190,7 +196,7 @@ export default function NewAssignmentForm({
         }),
       });
       if (!res.ok) throw new Error(await readApiError(res, "We couldn't save this assignment."));
-      router.push("/tutor/assignments");
+      router.push(returnTo ?? "/tutor/assignments");
       router.refresh();
     } catch (err) {
       setError(

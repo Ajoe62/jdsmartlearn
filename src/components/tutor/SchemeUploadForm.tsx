@@ -44,6 +44,8 @@ export default function SchemeUploadForm({
   teachable,
   unmatched,
   filesAvailable,
+  prefill,
+  returnTo,
 }: {
   classes: { id: string; name: string }[];
   subjects: { id: string; name: string }[];
@@ -53,10 +55,14 @@ export default function SchemeUploadForm({
   unmatched: UnmatchedClasses;
   /** False when R2 is not configured: paste or type the weeks instead. */
   filesAvailable: boolean;
+  /** Class and subject from a subject page's "Upload scheme", already checked. */
+  prefill?: { classId: string; subjectId: string };
+  /** The subject page to return to after saving, when opened from one. */
+  returnTo?: string | null;
 }) {
   const router = useRouter();
 
-  const [classId, setClassId] = useState(classes[0]?.id ?? "");
+  const [classId, setClassId] = useState(prefill?.classId || classes[0]?.id || "");
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   /** The document, once it has reached storage. */
@@ -76,7 +82,7 @@ export default function SchemeUploadForm({
     () => (classGap === "blocked" ? [] : subjectsForClass(teachable, subjects, classId)),
     [teachable, subjects, classId, classGap]
   );
-  const [subjectId, setSubjectId] = useState(available[0]?.id ?? "");
+  const [subjectId, setSubjectId] = useState(prefill?.subjectId || available[0]?.id || "");
 
   // The class changed and the chosen subject is no longer offered with it.
   const effectiveSubject = available.some((s) => s.id === subjectId)
@@ -109,7 +115,7 @@ export default function SchemeUploadForm({
         return;
       }
 
-      router.push("/tutor/schemes");
+      router.push(returnTo ?? "/tutor/schemes");
       router.refresh();
     } catch {
       setError("We couldn't reach the internet. Your scheme of work was not saved.");

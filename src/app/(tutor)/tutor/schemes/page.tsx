@@ -84,7 +84,8 @@ export default async function SchemesPage() {
       />
 
       <NavPills>
-        <NavPill href="/tutor">Lessons</NavPill>
+        <NavPill href="/tutor">Classes</NavPill>
+        <NavPill href="/tutor/lessons">All lessons</NavPill>
         <NavPill href="/tutor/assignments">Assignments</NavPill>
         <NavPill href="/tutor/schemes" active>
           Schemes of work

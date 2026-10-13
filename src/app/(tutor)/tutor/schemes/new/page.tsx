@@ -5,7 +5,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import AwaitingAllocation from "@/components/tutor/AwaitingAllocation";
 import SchemeUploadForm from "@/components/tutor/SchemeUploadForm";
 import { getTutorSession } from "@/lib/auth/tutor";
-import { authorsNothing } from "@/lib/auth/subject-access";
+import { authorsNothing, subjectsForClass, unmatchedState } from "@/lib/auth/subject-access";
+import { parsePrefill, safeReturnTo } from "@/lib/tutor-shelf";
 import {
   getClassesByIds,
   getSubjects,
@@ -22,7 +23,11 @@ import { storageConfigured } from "@/lib/storage/provider";
  * request - never cached on the device. A tutor removed from a class in
  * ResultPeak must lose the ability to upload for it on their next page load.
  */
-export default async function NewSchemePage() {
+export default async function NewSchemePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ class?: string; subject?: string; returnTo?: string }>;
+}) {
   const session = await getTutorSession();
   if (!session) redirect("/tutor/sign-in");
 
@@ -39,6 +44,24 @@ export default async function NewSchemePage() {
     session,
     classes.map((c) => c.id)
   );
+
+  /**
+   * Opened from a subject page: class and subject arrive in the URL. Checked
+   * against what this tutor may pick before the form sees them - a prefill is a
+   * convenience, and the route re-checks the pair on save anyway.
+   */
+  const query = await searchParams;
+  const prefill = parsePrefill(
+    { get: (k) => (query as Record<string, string | undefined>)[k] ?? null },
+    {
+      classIds: classes.map((c) => c.id),
+      subjectsForClass: (id) =>
+        unmatchedState(unmatched, id) === "blocked"
+          ? []
+          : subjectsForClass(teachable, subjects, id).map((s) => s.id),
+    }
+  );
+  const returnTo = safeReturnTo(query.returnTo);
 
   return (
     <main className="mx-auto max-w-readable px-5 py-8">
@@ -77,6 +100,8 @@ export default async function NewSchemePage() {
         </div>
       ) : (
         <SchemeUploadForm
+          prefill={{ classId: prefill.classId, subjectId: prefill.subjectId }}
+          returnTo={returnTo}
           classes={classes.map((c) => ({ id: c.id, name: c.name }))}
           subjects={subjects}
           teachable={teachable}

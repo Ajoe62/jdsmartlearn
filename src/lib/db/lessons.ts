@@ -43,12 +43,21 @@ export async function getLesson(lessonId: string): Promise<Lesson | null> {
   return snap.exists ? ({ id: snap.id, ...snap.data() } as Lesson) : null;
 }
 
+/**
+ * The fields a lesson LIST needs. `extractedText` (up to 800 KB) and the student
+ * payload stay out: a list of 200 lessons must not download 200 lessons.
+ */
+const LIST_FIELDS = [
+  "title", "className", "classId", "subjectId", "tutorId", "status", "publishedAt",
+  "materialPublishedAt", "updatedAt", "kind", "week", "term", "session", "topicTitle",
+] as const;
+
 /** Every lesson in a school (admin view). One equality filter, sorted in memory. */
 export async function listLessonsForSchool(schoolId: string) {
   const snap = await adminDb
     .collection(JD.lessons)
     .where("schoolId", "==", schoolId)
-    .select("title", "className", "classId", "subjectId", "tutorId", "status", "publishedAt", "materialPublishedAt", "updatedAt", "kind", "week")
+    .select(...LIST_FIELDS)
     .limit(QUERY_LIMIT)
     .get();
   return snap.docs
@@ -62,11 +71,55 @@ export async function listLessonsForTutor(schoolId: string, tutorId: string) {
     .collection(JD.lessons)
     .where("schoolId", "==", schoolId)
     .where("tutorId", "==", tutorId)
+    .select(...LIST_FIELDS)
     .limit(QUERY_LIMIT)
     .get();
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as Lesson)
     .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/**
+ * Lessons in ONE class, for the class -> subject -> week view. Drafts included:
+ * this is the tutor's and admin's own record, not what students see.
+ *
+ * Every filter is an equality, with no orderBy, so this needs NO composite index
+ * whichever of them are set - Firestore merges the single-field indexes. That
+ * matters: a composite index here would have to be deployed from ResultPeak's
+ * repo (CLAUDE.md, never deploy indexes from this one).
+ *
+ * `tutorId` narrows a teacher to their own lessons (owner's decision,
+ * 2026-10-13: two teachers sharing a subject see only their own; admins see
+ * all). `subjectId` narrows to one subject page. `term`/`session` narrow the
+ * class page's counts to the current term, so a class with years of history
+ * still fits inside the limit.
+ *
+ * `truncated` is true when the limit was reached, so a page can say its counts
+ * may be incomplete rather than silently under-report.
+ */
+export async function listLessonsInClass(filter: {
+  schoolId: string;
+  classId: string;
+  tutorId?: string;
+  subjectId?: string;
+  term?: { term: string; session: string };
+}): Promise<{ lessons: Lesson[]; truncated: boolean }> {
+  let q = adminDb
+    .collection(JD.lessons)
+    .where("schoolId", "==", filter.schoolId)
+    .where("classId", "==", filter.classId);
+  if (filter.tutorId) q = q.where("tutorId", "==", filter.tutorId);
+  if (filter.subjectId) q = q.where("subjectId", "==", filter.subjectId);
+  if (filter.term) {
+    q = q.where("term", "==", filter.term.term).where("session", "==", filter.term.session);
+  }
+  const snap = await q.select(...LIST_FIELDS).limit(QUERY_LIMIT).get();
+  return {
+    lessons: snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as Lesson)
+      .sort((a, b) => b.updatedAt - a.updatedAt),
+    truncated: snap.size >= QUERY_LIMIT,
+  };
 }
 
 export type VisibleLesson = {

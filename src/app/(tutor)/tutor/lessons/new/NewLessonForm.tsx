@@ -22,6 +22,7 @@ import {
 import { readApiError } from "@/lib/upload-client";
 import { CLASS_LEVELS, LEVEL_LABELS } from "@/lib/class-level";
 import { weekLabel } from "@/lib/notes/group";
+import { parsePrefill } from "@/lib/tutor-shelf";
 import { MAX_WEEK, type ClassLevel, type NoteKind } from "@/types";
 
 type ClassOpt = { id: string; name: string; level?: ClassLevel };
@@ -200,6 +201,36 @@ export default function NewLessonForm({
       setTitle(`${weekLabel(next)} ${subjectName ? `${subjectName} ` : ""}notes`);
     }
   }
+
+  /**
+   * Opened from a subject page's "Add notes": class, subject and week arrive in
+   * the URL (?class=&subject=&week=). Read on the device, not the server, so the
+   * page the service worker saves for offline use stays one page whatever link
+   * opened it. A class or subject this tutor may not pick is dropped, not shown.
+   */
+  useEffect(() => {
+    const p = parsePrefill(new URLSearchParams(window.location.search), {
+      classIds: classes.map((c) => c.id),
+      subjectsForClass: (id) =>
+        unmatchedState(unmatched, id) === "blocked"
+          ? []
+          : subjectsForClass(teachable, subjects, id).map((s) => s.id),
+    });
+    if (!p.classId) return;
+    setClassId(p.classId);
+    if (p.kind) setNoteKind(p.kind);
+    if (!p.subjectId) return;
+    setSubjectId(p.subjectId);
+    if (p.week !== null) {
+      setWeek(p.week);
+      if (p.kind !== "topic") {
+        const subjectName = subjects.find((s) => s.id === p.subjectId)?.name;
+        setTitle(`${weekLabel(p.week)} ${subjectName ? `${subjectName} ` : ""}notes`);
+      }
+    }
+    // Once, on arrival: after that the tutor's own choices win.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Tell the tutor exactly what's missing instead of a silently disabled button.
   const missing: string[] = [];

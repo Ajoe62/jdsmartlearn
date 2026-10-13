@@ -45,7 +45,8 @@ export default async function AnnouncementsPage() {
       />
 
       <NavPills>
-        <NavPill href="/tutor">Lessons</NavPill>
+        <NavPill href="/tutor">Classes</NavPill>
+        <NavPill href="/tutor/lessons">All lessons</NavPill>
         <NavPill href="/tutor/assignments">Assignments</NavPill>
         <NavPill href="/tutor/schemes">Schemes of work</NavPill>
         <NavPill href="/tutor/announcements" active>

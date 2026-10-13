@@ -38,7 +38,7 @@ export default async function TutorAssignmentsPage() {
       </div>
 
       <Link href="/tutor" className="mt-3 block text-sm text-muted">
-        Back to your lessons
+        Back to your classes
       </Link>
 
       <SkipNotices reasons={skips} />

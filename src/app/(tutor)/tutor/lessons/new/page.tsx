@@ -47,7 +47,7 @@ export default async function NewLessonPage() {
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
       <Link href="/tutor" className="text-sm text-muted">
-        ← Your lessons
+        ← Your classes
       </Link>
       <h1 className="mt-3 text-title">New lesson</h1>
 

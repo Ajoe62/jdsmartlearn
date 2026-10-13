@@ -12,6 +12,7 @@ import { getClassesByIds, listClassesForSchool } from "@/lib/db/resultpeak";
 import { listTopics } from "@/lib/db/topics";
 import { classLevel } from "@/lib/class-level";
 import { weekLabel } from "@/lib/notes/group";
+import { subjectHref } from "@/lib/tutor-shelf";
 import { MIN_USABLE_CHARS } from "@/lib/extract/text";
 import { formatBytes } from "@/lib/format";
 import ReviewLesson from "./ReviewLesson";
@@ -77,8 +78,9 @@ export default async function LessonReviewPage({
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/tutor" className="text-sm text-muted">
-        ← Your lessons
+      {/* Back to where the lesson lives: its class, its subject, its week. */}
+      <Link href={subjectHref(lesson.classId, lesson.subjectId)} className="text-sm text-muted">
+        ← {lesson.className}
       </Link>
       {(weekly || typeof lesson.week === "number") && (
         <p className="mt-3 text-eyebrow font-semibold uppercase text-brand">

@@ -7,7 +7,8 @@ import {
   getPickerAllocation,
   listClassesForSchool,
 } from "@/lib/db/resultpeak";
-import { authorsNothing } from "@/lib/auth/subject-access";
+import { authorsNothing, subjectsForClass, unmatchedState } from "@/lib/auth/subject-access";
+import { parsePrefill, safeReturnTo } from "@/lib/tutor-shelf";
 import { listLessonsForSchool, listLessonsForTutor } from "@/lib/db/lessons";
 import { storageConfigured } from "@/lib/storage/provider";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
@@ -22,7 +23,11 @@ import NewAssignmentForm from "./NewAssignmentForm";
  * `assignedClasses` is read fresh on this request and never cached, so a
  * revocation in ResultPeak applies immediately (CLAUDE.md, Tutor offline).
  */
-export default async function NewAssignmentPage() {
+export default async function NewAssignmentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ class?: string; subject?: string; returnTo?: string }>;
+}) {
   const session = await getTutorSession();
   if (!session) redirect("/tutor/sign-in");
 
@@ -56,6 +61,24 @@ export default async function NewAssignmentPage() {
     classes.map((c) => c.id)
   );
 
+  /**
+   * Opened from a subject page: class and subject arrive in the URL. Checked
+   * against what this tutor may pick before the form sees them - a prefill is a
+   * convenience, and the route re-checks the pair on save anyway.
+   */
+  const query = await searchParams;
+  const prefill = parsePrefill(
+    { get: (k) => (query as Record<string, string | undefined>)[k] ?? null },
+    {
+      classIds: classes.map((c) => c.id),
+      subjectsForClass: (id) =>
+        unmatchedState(unmatched, id) === "blocked"
+          ? []
+          : subjectsForClass(teachable, subjects, id).map((s) => s.id),
+    }
+  );
+  const returnTo = safeReturnTo(query.returnTo);
+
   const linkable = lessons
     .filter((l) => l.status === "published" || l.materialPublishedAt)
     .map((l) => ({
@@ -67,8 +90,8 @@ export default async function NewAssignmentPage() {
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
-      <Link href="/tutor" className="text-sm text-muted">
-        Back to your lessons
+      <Link href={returnTo ?? "/tutor"} className="text-sm text-muted">
+        {returnTo ? "Back to the subject" : "Back to your classes"}
       </Link>
       <h1 className="mt-3 text-title">New assignment</h1>
 
@@ -106,6 +129,8 @@ export default async function NewAssignmentPage() {
         </div>
       ) : (
         <NewAssignmentForm
+          prefill={{ classId: prefill.classId, subjectId: prefill.subjectId }}
+          returnTo={returnTo}
           classes={classes.map((c) => ({ id: c.id, name: c.name }))}
           subjects={subjects}
           teachable={teachable}
