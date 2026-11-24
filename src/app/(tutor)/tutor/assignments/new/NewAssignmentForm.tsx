@@ -179,15 +179,19 @@ export default function NewAssignmentForm({
       setError("The due date has already passed. Pick a later one.");
       return;
     }
-    const opening = visibility === "scheduled" ? new Date(opensAt).getTime() : null;
-    const closing = visibility === "scheduled" ? new Date(closesAt).getTime() : null;
-    if (visibility === "scheduled" && (!Number.isFinite(opening) || !Number.isFinite(closing) || closing <= opening)) {
-      setError("The hiding time must be after the opening time.");
-      return;
-    }
-    if (visibility === "scheduled" && dueDate > closing!) {
-      setError("The due date must be on or before the hiding time.");
-      return;
+    let opening: number | null = null;
+    let closing: number | null = null;
+    if (visibility === "scheduled") {
+      opening = new Date(opensAt).getTime();
+      closing = new Date(closesAt).getTime();
+      if (!Number.isFinite(opening) || !Number.isFinite(closing) || closing <= opening) {
+        setError("The hiding time must be after the opening time.");
+        return;
+      }
+      if (dueDate > closing) {
+        setError("The due date must be on or before the hiding time.");
+        return;
+      }
     }
 
     setBusy(true);
