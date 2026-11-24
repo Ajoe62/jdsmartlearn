@@ -138,6 +138,7 @@ export default async function SubmissionsPage({
       </Link>
 
       <h1 className="mt-3 text-title">{assignment.title}</h1>
+      <Link href={`/tutor/assignments/${assignmentId}/edit`} className="mt-2 inline-block font-medium text-brand">Edit schedule</Link>
       <p className="mt-1 text-sm text-muted">
         {assignment.className} &middot; {assignment.subjectName} &middot; Due{" "}
         {new Date(assignment.dueDate).toDateString()}
