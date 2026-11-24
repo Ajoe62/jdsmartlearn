@@ -10,6 +10,7 @@ export default async function EditAssignment({ params }: { params: Promise<{ ass
   const { assignmentId } = await params;
   const assignment = await getAssignment(assignmentId);
   if (!assignment || assignment.schoolId !== session.schoolId || (!session.isAdmin && assignment.tutorId !== session.uid)) notFound();
+  if (assignment.term !== "Second Term") notFound();
   try { assertClassAccess(session, assignment.classId); assertDocumentSubjectAccess(session, assignment); } catch { notFound(); }
   return <main className="mx-auto max-w-readable px-5 py-10">
     <Link href={`/tutor/assignments/${assignmentId}/submissions`} className="text-sm text-muted">Back to assignment</Link>

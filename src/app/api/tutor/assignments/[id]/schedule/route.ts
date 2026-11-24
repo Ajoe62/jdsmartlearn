@@ -22,6 +22,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     const snap = await tx.get(ref);
     const a = snap.exists ? snap.data() as Assignment : null;
     if (!a || a.schoolId !== session.schoolId || (!session.isAdmin && a.tutorId !== session.uid)) return { status: 404, error: "Assignment not found." };
+    if (a.term !== "Second Term") return { status: 400, error: "Scheduling edits are available only for Second Term assignments." };
     try { assertClassAccess(session, a.classId); assertDocumentSubjectAccess(session, a); } catch { return { status: 403, error: "You cannot edit this assignment." }; }
     if (a.updatedAt !== baseUpdatedAt) return { status: 409, error: "This assignment changed. Reload it before saving." };
     tx.update(ref, { opensAt, closesAt, dueDate, updatedAt: Date.now() });
