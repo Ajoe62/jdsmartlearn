@@ -223,6 +223,10 @@ export async function POST(req: Request) {
   }
 
   const isActive = body.isActive !== false;
+  // `opensAt` is nullable by design for “Show now”; keep the notification
+  // decision in the same null-safe form so a scheduled assignment never
+  // announces before its window begins.
+  const showsImmediately = opensAt === null || opensAt <= Date.now();
 
   /**
    * The id first, so the sheet is stored under the assignment's own key before
@@ -291,7 +295,7 @@ export async function POST(req: Request) {
    * itself. Best effort - a failed feed write must not lose the assignment the
    * tutor just spent ten minutes writing.
    */
-  if (isActive && (body.opensAt === null || opensAt <= Date.now())) {
+  if (isActive && showsImmediately) {
     try {
       await writeNotification({
         schoolId: session.schoolId,
