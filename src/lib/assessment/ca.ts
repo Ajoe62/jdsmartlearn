@@ -40,7 +40,7 @@ export function denormalizedFrom(
   a: Pick<
     AssignmentSubmission,
     "schoolId" | "classId" | "subjectId" | "term" | "session" | "tutorId" | "maxMarks"
-  > & { id: string; title: string; subjectName: string }
+  > & { id: string; title: string; subjectName: string; assessmentTypeId?: string }
 ) {
   return {
     schoolId: a.schoolId,
@@ -49,6 +49,7 @@ export function denormalizedFrom(
     subjectId: a.subjectId,
     term: a.term,
     session: a.session,
+    ...(a.assessmentTypeId ? { assessmentTypeId: a.assessmentTypeId } : {}),
     tutorId: a.tutorId,
     assignmentTitle: a.title,
     subjectName: a.subjectName,

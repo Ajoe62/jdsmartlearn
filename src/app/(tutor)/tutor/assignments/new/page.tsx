@@ -6,6 +6,7 @@ import {
   getSubjects,
   getPickerAllocation,
   listClassesForSchool,
+  getSchool,
 } from "@/lib/db/resultpeak";
 import { authorsNothing, subjectsForClass, unmatchedState } from "@/lib/auth/subject-access";
 import { parsePrefill, safeReturnTo } from "@/lib/tutor-shelf";
@@ -31,7 +32,7 @@ export default async function NewAssignmentPage({
   const session = await getTutorSession();
   if (!session) redirect("/tutor/sign-in");
 
-  const [classes, subjects, lessons, settings] = await Promise.all([
+  const [classes, subjects, lessons, settings, school] = await Promise.all([
     session.isAdmin
       ? listClassesForSchool(session.schoolId)
       : getClassesByIds(session.assignedClasses),
@@ -46,6 +47,7 @@ export default async function NewAssignmentPage({
      * assignment document at creation and never resolved again at read time.
      */
     getCurrentTermSession(session.schoolId),
+    getSchool(session.schoolId),
   ]);
 
   /**
@@ -140,6 +142,9 @@ export default async function NewAssignmentPage({
           defaultSession={settings.session}
           knownSessions={settings.knownSessions}
           filesAvailable={storageConfigured()}
+          assessmentTypes={(school?.assessmentTypes ?? [])
+            .filter((item) => item.teacherMarked !== false && item.automated !== true && item.systemMarked !== true)
+            .map((item) => ({ value: item.value, label: item.label ?? item.name ?? item.value, maxScore: item.maxScore }))}
         />
       )}
     </main>

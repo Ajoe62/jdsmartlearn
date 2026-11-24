@@ -55,6 +55,8 @@ export interface ResultPeakSchool {
   subjects: { id: string; name: string }[];
   gradingScale: { min: number; letter: string; remark: string }[];
   isActive: boolean;
+  /** ResultPeak-owned assessment columns. `value` is the stable join key. */
+  assessmentTypes?: { value: string; label?: string; name?: string; maxScore?: number; teacherMarked?: boolean; automated?: boolean; systemMarked?: boolean }[];
   /**
    * Whether this school enforces (classId, subjectId) tutor allocation.
    *

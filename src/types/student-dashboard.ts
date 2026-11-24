@@ -181,6 +181,11 @@ export interface Assignment {
   term: AcademicTerm;
   session: AcademicSession;
   isActive: boolean;
+  /** Stable Resultpeak assessment box. Missing only on legacy assignments. */
+  assessmentTypeId?: string;
+  /** Student visibility window. Both absent retains legacy behaviour. */
+  opensAt?: number | null;
+  closesAt?: number | null;
   /**
    * The question sheet the tutor attached, if any: a file students open or
    * download, stored in R2 like a lesson's original and served only by
@@ -264,6 +269,8 @@ export interface AssignmentSubmission {
   /** Copied verbatim from the assignment. Never resolved at read time. */
   term: AcademicTerm;
   session: AcademicSession;
+  /** Copied from the parent assignment; absent only for legacy submissions. */
+  assessmentTypeId?: string;
   /**
    * The tutor who set the assignment. Denormalized so the security rule that
    * lets a tutor read submissions on their own assignment is a field comparison,

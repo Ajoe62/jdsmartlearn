@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { getStudentSession } from "@/lib/auth/student";
 import { getAssignment, isSubmittable } from "@/lib/db/assignments";
+import { isAssignmentVisibleToStudent, assignmentAvailabilityMessage } from "@/lib/assignments/availability";
 import {
   createSubmission,
   denormalizedFrom,
@@ -112,6 +113,10 @@ export async function POST(req: Request) {
     return bad("That assignment is not for your class.", 404);
   }
 
+  if (!isAssignmentVisibleToStudent(assignment)) {
+    return bad(assignmentAvailabilityMessage(assignment) ?? "That assignment is not available.", 404);
+  }
+
   const existing = await getSubmission(submissionId(assignmentId, session.studentId));
 
   if (action === "status") {
@@ -133,7 +138,6 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!assignment.isActive) return bad("Your teacher has closed this assignment.", 409);
   if (!isSubmittable(assignment)) {
     return bad("The time for this assignment has passed. Speak to your teacher.", 409);
   }

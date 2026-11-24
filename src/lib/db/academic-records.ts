@@ -160,10 +160,12 @@ export async function syncContinuousAssessment(entry: {
   subjectId: string;
   session: string;
   term: string;
+  /** New assignments supply their own box; absent uses the legacy setting. */
+  assessmentTypeId?: string;
   percentage: number;
   submissionCount: number;
 }): Promise<CaSyncOutcome> {
-  const settings = await getCurrentTermSession(entry.schoolId);
+  const settings = entry.assessmentTypeId ? null : await getCurrentTermSession(entry.schoolId);
 
   /**
    * Re-check against the school document every time, not against the setting
@@ -177,7 +179,11 @@ export async function syncContinuousAssessment(entry: {
     ?.assessmentTypes;
   const known = Array.isArray(types) ? types.map((t) => t.value) : [];
 
-  const target = decideCaTarget(settings, known);
+  const target = entry.assessmentTypeId
+    ? (known.includes(entry.assessmentTypeId)
+      ? { status: "ready" as const, assessmentTypeId: entry.assessmentTypeId }
+      : { status: "skipped" as const, reason: "type_removed" as const, detail: `assessment type "${entry.assessmentTypeId}" is no longer on the school record` })
+    : decideCaTarget(settings, known);
   if (target.status === "skipped") return target;
   const typeId = target.assessmentTypeId;
 
@@ -221,6 +227,7 @@ export async function recordCaScore(entry: {
   session: string;
   term: string;
   assessmentTypeId: string;
+  assessmentTypeId: string;
   percentage: number;
   /** How many finalised submissions the percentage was averaged from. */
   submissionCount: number;
@@ -232,6 +239,7 @@ export async function recordCaScore(entry: {
     entry.subjectId,
     entry.session,
     entry.term,
+    entry.assessmentTypeId,
   ].join("_");
   await adminDb
     .doc(`${JD.caScores}/${encodeURIComponent(id)}`)

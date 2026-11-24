@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getStudentSession } from "@/lib/auth/student";
 import { getAssignment, toStudentAssignment } from "@/lib/db/assignments";
+import { isAssignmentVisibleToStudent } from "@/lib/assignments/availability";
 import {
   buildAssignmentList,
   listSubmissionsForStudent,
@@ -42,7 +43,7 @@ export async function GET(req: Request) {
   const details = await Promise.all(pending.map((item) => getAssignment(item.assignmentId)));
   const detailById = new Map(
     details
-      .filter((a) => a !== null)
+      .filter((a) => a !== null && isAssignmentVisibleToStudent(a))
       .map((a) => {
         const safe = toStudentAssignment(a);
         return [safe.assignmentId, safe];
