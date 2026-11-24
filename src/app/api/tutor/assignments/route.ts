@@ -115,12 +115,14 @@ export async function POST(req: Request) {
   if (typeof assessmentTypeId !== "string" || !assessmentTypeId) {
     return bad("Choose a Result-sheet box.");
   }
-  const opensAt = body.opensAt === null ? null : Number(body.opensAt);
-  const closesAt = body.closesAt === null ? null : Number(body.closesAt);
+  let opensAt: number | null = null;
+  let closesAt: number | null = null;
   if ((body.opensAt === null) !== (body.closesAt === null)) {
     return bad("Choose both visibility times, or show the assignment now.");
   }
   if (body.opensAt !== null && body.closesAt !== null) {
+    opensAt = Number(body.opensAt);
+    closesAt = Number(body.closesAt);
     if (!Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= opensAt) {
       return bad("The hiding time must be after the opening time.");
     }
