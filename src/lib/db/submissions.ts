@@ -164,6 +164,7 @@ export function getClassAssignments(schoolId: string, classId: string) {
         session: a.session,
         opensAt: a.opensAt ?? null,
         closesAt: a.closesAt ?? null,
+        isActive: a.isActive,
       }));
     },
     ["class-assignments", schoolId, classId],

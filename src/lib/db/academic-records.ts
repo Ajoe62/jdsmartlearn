@@ -227,7 +227,6 @@ export async function recordCaScore(entry: {
   session: string;
   term: string;
   assessmentTypeId: string;
-  assessmentTypeId: string;
   percentage: number;
   /** How many finalised submissions the percentage was averaged from. */
   submissionCount: number;
