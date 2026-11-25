@@ -4,6 +4,9 @@ import { getTutorSession, assertClassAccess, assertDocumentSubjectAccess } from 
 import { getAssignment } from "@/lib/db/assignments";
 import ScheduleForm from "./ScheduleForm";
 
+// Always read the assignment fresh, so the form never opens on old dates.
+export const dynamic = "force-dynamic";
+
 export default async function EditAssignment({ params }: { params: Promise<{ assignmentId: string }> }) {
   const session = await getTutorSession();
   if (!session) redirect("/tutor/sign-in");

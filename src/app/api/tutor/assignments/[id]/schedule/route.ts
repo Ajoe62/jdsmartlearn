@@ -25,10 +25,19 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (a.term !== "Second Term") return { status: 400, error: "Scheduling edits are available only for Second Term assignments." };
     try { assertClassAccess(session, a.classId); assertDocumentSubjectAccess(session, a); } catch { return { status: 403, error: "You cannot edit this assignment." }; }
     if (a.updatedAt !== baseUpdatedAt) return { status: 409, error: "This assignment changed. Reload it before saving." };
-    tx.update(ref, { opensAt, closesAt, dueDate, updatedAt: Date.now() });
-    return { status: 200, classId: a.classId };
+    const updatedAt = Date.now();
+    tx.update(ref, { opensAt, closesAt, dueDate, updatedAt });
+    return { status: 200, classId: a.classId, updatedAt, opensAt, closesAt, dueDate };
   });
   if (result.status !== 200) return NextResponse.json({ error: result.error }, { status: result.status });
   revalidateTag(classAssignmentsTag(result.classId!));
-  return NextResponse.json({ ok: true });
+  // The saved values and the new version, so the form keeps showing exactly
+  // what was stored and its next save is not refused as stale.
+  return NextResponse.json({
+    ok: true,
+    updatedAt: result.updatedAt,
+    opensAt: result.opensAt,
+    closesAt: result.closesAt,
+    dueDate: result.dueDate,
+  });
 }
