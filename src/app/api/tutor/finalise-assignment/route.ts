@@ -127,7 +127,8 @@ export async function POST(req: Request) {
       submission.studentId,
       submission.subjectId,
       submission.term,
-      submission.session
+      submission.session,
+      submission.assessmentTypeId
     );
     const withThisOne = replaceOrAppend(finalised, {
       ...submission,
@@ -167,6 +168,7 @@ export async function POST(req: Request) {
       subjectId: submission.subjectId,
       session: submission.session,
       term: submission.term,
+      assessmentTypeId: submission.assessmentTypeId,
       percentage: average,
       submissionCount: finalisedCount,
     });

@@ -78,6 +78,7 @@ export default async function TutorAssignmentsPage() {
                   )}
                 </p>
               </Link>
+              {a.term === "Second Term" && <Link href={`/tutor/assignments/${a.id}/edit`} className="mt-3 inline-block text-sm font-medium text-brand">Edit schedule</Link>}
             </li>
           ))}
         </ul>

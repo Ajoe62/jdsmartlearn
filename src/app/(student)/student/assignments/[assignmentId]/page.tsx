@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getStudentSession } from "@/lib/auth/student";
 import { getAssignment, isSubmittable, toStudentAssignment } from "@/lib/db/assignments";
+import { isAssignmentVisibleToStudent } from "@/lib/assignments/availability";
 import { listVisibleLessonsForClass } from "@/lib/db/lessons";
 import {
   getSubmission,
@@ -39,7 +40,7 @@ export default async function StudentAssignmentPage({
     !assignment ||
     assignment.schoolId !== session.schoolId ||
     assignment.classId !== session.classId ||
-    !assignment.isActive
+    !isAssignmentVisibleToStudent(assignment)
   ) {
     return <NotFound />;
   }

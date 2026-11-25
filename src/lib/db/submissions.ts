@@ -4,6 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { JD, LIST_LIMIT, QUERY_LIMIT } from "./collections";
 import { assertWritable } from "./write-guard";
 import { listActiveAssignmentsForClass } from "./assignments";
+import { isAssignmentVisibleToStudent } from "@/lib/assignments/availability";
 
 /**
  * Re-exported from the pure modules so callers keep one import, while the rules
@@ -107,7 +108,8 @@ export async function listFinalisedForSubject(
   studentId: string,
   subjectId: string,
   term: string,
-  session: string
+  session: string,
+  assessmentTypeId?: string
 ) {
   const snap = await adminDb
     .collection(JD.submissions)
@@ -119,7 +121,10 @@ export async function listFinalisedForSubject(
     .where("status", "==", "finalised")
     .limit(QUERY_LIMIT)
     .get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as AssignmentSubmission);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as AssignmentSubmission)
+    // Missing is legacy and remains part of the old fallback bucket only.
+    .filter((row) => assessmentTypeId ? row.assessmentTypeId === assessmentTypeId : !row.assessmentTypeId);
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +148,10 @@ const REVALIDATE_SECONDS = 300;
 export function getClassAssignments(schoolId: string, classId: string) {
   return unstable_cache(
     async () => {
-      const assignments = await listActiveAssignmentsForClass(schoolId, classId);
+      // Cache candidates, never a time-filtered result: an assignment must
+      // appear exactly when it opens and disappear exactly when it closes,
+      // rather than at the next cache revalidation.
+      const assignments = await listActiveAssignmentsForClass(schoolId, classId, Date.now(), true);
       return assignments.map((a) => ({
         assignmentId: a.id,
         title: a.title,
@@ -154,6 +162,9 @@ export function getClassAssignments(schoolId: string, classId: string) {
         maxMarks: a.maxMarks,
         term: a.term,
         session: a.session,
+        opensAt: a.opensAt ?? null,
+        closesAt: a.closesAt ?? null,
+        isActive: a.isActive,
       }));
     },
     ["class-assignments", schoolId, classId],
@@ -181,11 +192,15 @@ export async function buildAssignmentList(
   const byAssignment = new Map(submissions.map((s) => [s.assignmentId, s]));
   const now = Date.now();
 
-  const items: AssignmentListItem[] = assignments.map((a) => {
+  const items: AssignmentListItem[] = assignments
+    .filter((a) => isAssignmentVisibleToStudent(a, Date.now()))
+    .map((a) => {
     const sub = byAssignment.get(a.assignmentId) ?? null;
     const finalScore = sub?.status === "finalised" ? sub.finalScore : null;
     return {
       assignmentId: a.assignmentId,
+      opensAt: a.opensAt,
+      closesAt: a.closesAt,
       title: a.title,
       subjectId: a.subjectId,
       subjectName: a.subjectName,
@@ -203,7 +218,7 @@ export async function buildAssignmentList(
           : Math.round((finalScore / a.maxMarks) * 100),
       isOverdue: sub === null && a.dueDate < now,
     };
-  });
+    });
 
   return items.sort((a, b) => a.dueDate - b.dueDate);
 }

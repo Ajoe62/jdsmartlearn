@@ -11,6 +11,7 @@ import { sweepAssignment } from "@/lib/db/grading-sweep";
 import { getSchoolSkips } from "@/lib/db/skips";
 import SkipNotices from "@/components/tutor/SkipNotices";
 import SubmissionReview from "@/components/tutor/SubmissionReview";
+import DeleteAssignment from "./DeleteAssignment";
 import type { TutorSubmissionRow } from "@/types/student-dashboard";
 
 /**
@@ -138,6 +139,7 @@ export default async function SubmissionsPage({
       </Link>
 
       <h1 className="mt-3 text-title">{assignment.title}</h1>
+      {assignment.term === "Second Term" && <Link href={`/tutor/assignments/${assignmentId}/edit`} className="mt-2 inline-block font-medium text-brand">Edit schedule</Link>}
       <p className="mt-1 text-sm text-muted">
         {assignment.className} &middot; {assignment.subjectName} &middot; Due{" "}
         {new Date(assignment.dueDate).toDateString()}
@@ -164,6 +166,13 @@ export default async function SubmissionsPage({
         markingGuide={assignment.markingGuide}
         rows={rows}
         details={details}
+      />
+
+      <DeleteAssignment
+        assignmentId={assignment.id}
+        title={assignment.title}
+        hasSubmissions={submissions.length > 0}
+        isActive={assignment.isActive}
       />
     </main>
   );

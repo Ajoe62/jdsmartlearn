@@ -57,6 +57,7 @@ export default function NewAssignmentForm({
   defaultSession,
   knownSessions,
   filesAvailable,
+  assessmentTypes,
   prefill,
   returnTo,
 }: {
@@ -73,6 +74,7 @@ export default function NewAssignmentForm({
   /** The only sessions this school may pick. Never a free-text input. */
   knownSessions: string[];
   filesAvailable: boolean;
+  assessmentTypes: { value: string; label: string; maxScore?: number }[];
   /** Class and subject from a subject page's "New assignment", already checked. */
   prefill?: { classId: string; subjectId: string };
   /** The subject page to return to after saving, when opened from one. */
@@ -88,6 +90,10 @@ export default function NewAssignmentForm({
   const [maxMarks, setMaxMarks] = useState("20");
   const [term, setTerm] = useState(defaultTerm);
   const [session, setSession] = useState(defaultSession);
+  const [assessmentTypeId, setAssessmentTypeId] = useState("");
+  const [visibility, setVisibility] = useState<"now" | "scheduled">("now");
+  const [opensAt, setOpensAt] = useState("");
+  const [closesAt, setClosesAt] = useState("");
   const [markingGuide, setMarkingGuide] = useState("");
   const [linkedLessonId, setLinkedLessonId] = useState("");
   const [fileTypes, setFileTypes] = useState<string[]>([]);
@@ -145,6 +151,8 @@ export default function NewAssignmentForm({
     missing.push(classGap === "blocked" ? "choose a class you have subjects in" : "choose a subject");
   }
   if (!due) missing.push("choose a due date");
+  if (!assessmentTypeId) missing.push("choose a Result-sheet box");
+  if (visibility === "scheduled" && (!opensAt || !closesAt)) missing.push("choose opening and hiding times");
   if (guideLength < MIN_GUIDE) {
     missing.push(
       `write what a correct answer should include (at least ${MIN_GUIDE} characters, ${guideLength} so far)`
@@ -171,6 +179,20 @@ export default function NewAssignmentForm({
       setError("The due date has already passed. Pick a later one.");
       return;
     }
+    let opening: number | null = null;
+    let closing: number | null = null;
+    if (visibility === "scheduled") {
+      opening = new Date(opensAt).getTime();
+      closing = new Date(closesAt).getTime();
+      if (!Number.isFinite(opening) || !Number.isFinite(closing) || closing <= opening) {
+        setError("The hiding time must be after the opening time.");
+        return;
+      }
+      if (dueDate > closing) {
+        setError("The due date must be on or before the hiding time.");
+        return;
+      }
+    }
 
     setBusy(true);
     try {
@@ -187,6 +209,9 @@ export default function NewAssignmentForm({
           maxMarks: Number(maxMarks),
           term,
           session,
+          assessmentTypeId,
+          opensAt: opening,
+          closesAt: closing,
           markingGuide: markingGuide.trim(),
           linkedLessonId: linkedLessonId || null,
           allowedFileTypes: filesAvailable ? fileTypes : [],
@@ -222,6 +247,19 @@ export default function NewAssignmentForm({
           placeholder="Photosynthesis: short answers"
           className={CONTROL}
         />
+      </label>
+
+      <label className="block">
+        <span className="text-sm font-medium">Result-sheet box</span>
+        <select value={assessmentTypeId} onChange={(e) => setAssessmentTypeId(e.target.value)} className={CONTROL}>
+          <option value="">Choose a Result-sheet box</option>
+          {assessmentTypes.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}{typeof item.maxScore === "number" ? ` (${item.maxScore} marks)` : ""}
+            </option>
+          ))}
+        </select>
+        <span className="mt-1 block text-sm text-muted">This decides where the final mark appears on the Resultpeak report sheet.</span>
       </label>
 
       <label className="block">
@@ -444,6 +482,17 @@ export default function NewAssignmentForm({
             File storage is not set up, so students will type their answers.
           </p>
         )}
+      </fieldset>
+
+      <fieldset className="rounded-lg border border-line bg-surface p-4">
+        <legend className="px-1 text-sm font-medium">Student visibility</legend>
+        <label className="mt-1 flex items-center gap-2 text-sm"><input type="radio" checked={visibility === "now"} onChange={() => setVisibility("now")} /> Show now</label>
+        <label className="mt-2 flex items-center gap-2 text-sm"><input type="radio" checked={visibility === "scheduled"} onChange={() => setVisibility("scheduled")} /> Schedule visibility</label>
+        {visibility === "scheduled" && <div className="mt-3 grid grid-cols-1 gap-3">
+          <label className="block text-sm">Show to students from<input type="datetime-local" value={opensAt} min={minDue} onChange={(e) => setOpensAt(e.target.value)} className={CONTROL} /></label>
+          <label className="block text-sm">Hide from students after<input type="datetime-local" value={closesAt} min={opensAt || minDue} onChange={(e) => setClosesAt(e.target.value)} className={CONTROL} /></label>
+          <p className="text-sm text-muted">Students cannot see this assignment before the opening time. It disappears after the closing time.</p>
+        </div>}
       </fieldset>
 
       <label className="flex items-center gap-3">

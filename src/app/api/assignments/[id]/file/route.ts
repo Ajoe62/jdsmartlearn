@@ -6,6 +6,7 @@ import {
 } from "@/lib/auth/tutor";
 import { getStudentSession } from "@/lib/auth/student";
 import { getAssignment } from "@/lib/db/assignments";
+import { isAssignmentVisibleToStudent } from "@/lib/assignments/availability";
 import { serveStoredFile } from "@/lib/storage/serve";
 
 /**
@@ -54,7 +55,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     if (
       assignment.schoolId !== student.schoolId ||
       assignment.classId !== student.classId ||
-      !assignment.isActive
+      !isAssignmentVisibleToStudent(assignment)
     ) {
       // One message for every refusal, so a guessed id confirms nothing.
       return NextResponse.json({ error: "Assignment not found." }, { status: 404 });

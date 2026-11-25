@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { JD, LIST_LIMIT, QUERY_LIMIT } from "./collections";
 import { assertWritable } from "./write-guard";
 import type { Assignment } from "@/types/student-dashboard";
+import { isAssignmentSubmittable, isAssignmentVisibleToStudent, SUBMISSION_GRACE_MS } from "@/lib/assignments/availability";
 
 /**
  * Assignments: the tutor-owned half of the assessment loop.
@@ -92,7 +93,12 @@ export async function listAssignmentsInClass(filter: {
  * Returns the FULL documents, marking guide included, so every caller on a
  * student path must project through toStudentAssignment() before responding.
  */
-export async function listActiveAssignmentsForClass(schoolId: string, classId: string) {
+export async function listActiveAssignmentsForClass(
+  schoolId: string,
+  classId: string,
+  now = Date.now(),
+  includeUnavailable = false
+) {
   const snap = await adminDb
     .collection(JD.assignments)
     .where("schoolId", "==", schoolId)
@@ -102,6 +108,7 @@ export async function listActiveAssignmentsForClass(schoolId: string, classId: s
     .get();
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as Assignment)
+    .filter((assignment) => includeUnavailable || isAssignmentVisibleToStudent(assignment, now))
     .sort((a, b) => a.dueDate - b.dueDate);
 }
 
@@ -121,10 +128,10 @@ export { toStudentAssignment } from "@/lib/assessment/projection";
  * a clock, not to idleness. One hour is the grace the spec asks for; the
  * interface still shows the assignment as overdue so nobody thinks it is free.
  */
-export const SUBMISSION_GRACE_MS = 60 * 60 * 1000;
+export { SUBMISSION_GRACE_MS };
 
-export function isSubmittable(a: Pick<Assignment, "isActive" | "dueDate">, now = Date.now()) {
-  return a.isActive && now <= a.dueDate + SUBMISSION_GRACE_MS;
+export function isSubmittable(a: Pick<Assignment, "isActive" | "dueDate" | "opensAt" | "closesAt">, now = Date.now()) {
+  return isAssignmentSubmittable(a, now);
 }
 
 /**

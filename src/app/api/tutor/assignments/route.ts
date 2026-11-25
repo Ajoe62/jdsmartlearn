@@ -6,7 +6,7 @@ import {
   assertClassAccess,
   assertSubjectAccess,
 } from "@/lib/auth/tutor";
-import { getSubjects } from "@/lib/db/resultpeak";
+import { getSchool, getSubjects } from "@/lib/db/resultpeak";
 import {
   createAssignment,
   newAssignmentId,
@@ -63,6 +63,9 @@ interface Body {
   term?: string;
   session?: string;
   isActive?: boolean;
+  assessmentTypeId?: string;
+  opensAt?: number | null;
+  closesAt?: number | null;
   /** Staging key of an uploaded question sheet. */
   uploadKey?: string | null;
   fileName?: string;
@@ -107,6 +110,24 @@ export async function POST(req: Request) {
   const dueDate = Number(body.dueDate);
   if (!Number.isFinite(dueDate)) return bad("Choose a due date.");
   if (dueDate <= Date.now()) return bad("The due date has already passed. Pick a later one.");
+
+  const assessmentTypeId = body.assessmentTypeId;
+  if (typeof assessmentTypeId !== "string" || !assessmentTypeId) {
+    return bad("Choose a Result-sheet box.");
+  }
+  let opensAt: number | null = null;
+  let closesAt: number | null = null;
+  if ((body.opensAt === null) !== (body.closesAt === null)) {
+    return bad("Choose both visibility times, or show the assignment now.");
+  }
+  if (body.opensAt !== null && body.closesAt !== null) {
+    opensAt = Number(body.opensAt);
+    closesAt = Number(body.closesAt);
+    if (!Number.isFinite(opensAt) || !Number.isFinite(closesAt) || closesAt <= opensAt) {
+      return bad("The hiding time must be after the opening time.");
+    }
+    if (dueDate > closesAt) return bad("The due date must be on or before the hiding time.");
+  }
 
   const maxMarks = Number(body.maxMarks);
   if (!Number.isInteger(maxMarks) || maxMarks < 1 || maxMarks > 100) {
@@ -174,9 +195,10 @@ export async function POST(req: Request) {
 
   // Class and subject are ResultPeak's. Read them to denormalize the display
   // names, and to prove the class is real rather than trusting the request.
-  const [classSnap, subjects] = await Promise.all([
+  const [classSnap, subjects, school] = await Promise.all([
     adminDb.doc(`${RP.classes}/${classId}`).get(),
     getSubjects(session.schoolId),
+    getSchool(session.schoolId),
   ]);
 
   const cls = classSnap.exists ? (classSnap.data() as ResultPeakClass) : null;
@@ -184,6 +206,10 @@ export async function POST(req: Request) {
 
   const subject = subjects.find((s) => s.id === subjectId);
   if (!subject) return bad("That subject is not on your school's list.");
+  const box = school?.assessmentTypes?.find((item) => item.value === assessmentTypeId);
+  if (!box || box.teacherMarked === false || box.automated === true || box.systemMarked === true) {
+    return bad("Choose a current teacher-marked Result-sheet box for your school.");
+  }
 
   // An optional link to a lesson, verified rather than trusted.
   let linkedLessonId: string | null = null;
@@ -197,6 +223,10 @@ export async function POST(req: Request) {
   }
 
   const isActive = body.isActive !== false;
+  // `opensAt` is nullable by design for “Show now”; keep the notification
+  // decision in the same null-safe form so a scheduled assignment never
+  // announces before its window begins.
+  const showsImmediately = opensAt === null || opensAt <= Date.now();
 
   /**
    * The id first, so the sheet is stored under the assignment's own key before
@@ -239,6 +269,9 @@ export async function POST(req: Request) {
         term,
         session: academicSession,
         isActive,
+        assessmentTypeId,
+        opensAt: body.opensAt === null ? null : opensAt,
+        closesAt: body.closesAt === null ? null : closesAt,
         ...(sheet ? fileFields(sheet) : {}),
       },
       assignmentId
@@ -262,7 +295,7 @@ export async function POST(req: Request) {
    * itself. Best effort - a failed feed write must not lose the assignment the
    * tutor just spent ten minutes writing.
    */
-  if (isActive) {
+  if (isActive && showsImmediately) {
     try {
       await writeNotification({
         schoolId: session.schoolId,
