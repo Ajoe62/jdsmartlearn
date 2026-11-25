@@ -11,6 +11,7 @@ import { sweepAssignment } from "@/lib/db/grading-sweep";
 import { getSchoolSkips } from "@/lib/db/skips";
 import SkipNotices from "@/components/tutor/SkipNotices";
 import SubmissionReview from "@/components/tutor/SubmissionReview";
+import DeleteAssignment from "./DeleteAssignment";
 import type { TutorSubmissionRow } from "@/types/student-dashboard";
 
 /**
@@ -165,6 +166,13 @@ export default async function SubmissionsPage({
         markingGuide={assignment.markingGuide}
         rows={rows}
         details={details}
+      />
+
+      <DeleteAssignment
+        assignmentId={assignment.id}
+        title={assignment.title}
+        hasSubmissions={submissions.length > 0}
+        isActive={assignment.isActive}
       />
     </main>
   );
