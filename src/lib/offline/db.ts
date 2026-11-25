@@ -244,6 +244,8 @@ export type StoredFile = {
  */
 export type StoredAssignment = {
   assignmentId: string;
+  opensAt?: number | null;
+  closesAt?: number | null;
   title: string;
   subjectId: string;
   subjectName: string;

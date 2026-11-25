@@ -11,6 +11,7 @@
  */
 
 import { STORE, getAll } from "./db";
+import { isAssignmentVisibleToStudent } from "@/lib/assignments/availability";
 import type {
   StoredAssignment,
   StoredLesson,
@@ -48,6 +49,8 @@ export async function readShelfInputs(): Promise<ShelfInputs | null> {
   } catch {
     return null;
   }
+
+  assignmentRows = assignmentRows.filter((a) => isAssignmentVisibleToStudent({ isActive: true, opensAt: a.opensAt, closesAt: a.closesAt }));
 
   const lessons: ShelfLesson[] = lessonRows.map((l) => ({
     lessonId: l.lessonId,

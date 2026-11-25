@@ -42,6 +42,7 @@ export async function GET(req: Request) {
    */
   const pending = list.filter((item) => item.status === null).slice(0, 20);
   const details = await Promise.all(pending.map((item) => getAssignment(item.assignmentId)));
+  const visibleIds = new Set(list.map((item) => item.assignmentId));
   const detailById = new Map(
     details
       .filter((a): a is Assignment => a !== null && isAssignmentVisibleToStudent(a))
@@ -58,6 +59,8 @@ export async function GET(req: Request) {
       const detail = detailById.get(item.assignmentId);
       return {
         assignmentId: item.assignmentId,
+        opensAt: item.opensAt ?? null,
+        closesAt: item.closesAt ?? null,
         title: item.title,
         subjectId: item.subjectId,
         subjectName: item.subjectName,
@@ -70,7 +73,7 @@ export async function GET(req: Request) {
         allowedFileTypes: detail?.allowedFileTypes ?? [],
       };
     }),
-    submissions: submissions.map((s) => {
+    submissions: submissions.filter((s) => visibleIds.has(s.assignmentId)).map((s) => {
       const safe = toStudentSubmissionPayload(s);
       return {
         assignmentId: safe.assignmentId,

@@ -6,6 +6,7 @@ import { STORE, getAll } from "@/lib/offline/db";
 import type { QueuedSubmission, StoredAssignment, StoredSubmission } from "@/lib/offline/db";
 import { discardSubmission, queuedSubmissions } from "@/lib/offline/submissions";
 import { ASSIGNMENT_TABS } from "@/types/student-dashboard";
+import { isAssignmentVisibleToStudent } from "@/lib/assignments/availability";
 import type {
   AssignmentListItem,
   AssignmentTab,
@@ -46,13 +47,16 @@ export default function AssignmentsView({
           getAll<StoredAssignment>(STORE.assignments),
           getAll<StoredSubmission>(STORE.submissions),
         ]);
-        if (!alive || assignments.length === 0) return;
+        // The server's freshly authorised result wins when online, including
+        // an empty list. Offline storage must not resurrect withdrawn work.
+        if (!alive || initial !== null || assignments.length === 0) return;
 
         const byId = new Map(submissions.map((s) => [s.assignmentId, s]));
         const now = Date.now();
 
         setItems(
           assignments
+            .filter((a) => isAssignmentVisibleToStudent({ isActive: true, opensAt: a.opensAt, closesAt: a.closesAt }, now))
             .map((a): AssignmentListItem => {
               const sub = byId.get(a.assignmentId) ?? null;
               const status = (sub?.status ?? null) as SubmissionStatus | null;
@@ -87,7 +91,7 @@ export default function AssignmentsView({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [initial]);
 
   const all = items ?? [];
   const shown = all.filter((item) => inTab(item, tab));

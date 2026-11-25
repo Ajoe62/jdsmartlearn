@@ -536,6 +536,8 @@ export type { LMSWritableRecordField } from "@/lib/db/collections";
  */
 export interface AssignmentListItem {
   assignmentId: string;
+  opensAt?: number | null;
+  closesAt?: number | null;
   title: string;
   subjectId: string;
   subjectName: string;

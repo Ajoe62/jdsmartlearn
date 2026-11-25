@@ -199,6 +199,8 @@ export async function buildAssignmentList(
     const finalScore = sub?.status === "finalised" ? sub.finalScore : null;
     return {
       assignmentId: a.assignmentId,
+      opensAt: a.opensAt,
+      closesAt: a.closesAt,
       title: a.title,
       subjectId: a.subjectId,
       subjectName: a.subjectName,
