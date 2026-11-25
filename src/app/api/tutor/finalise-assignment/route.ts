@@ -11,6 +11,8 @@ import { getProgress, progressId, upsertProgress } from "@/lib/db/progress";
 import { syncContinuousAssessment } from "@/lib/db/academic-records";
 import type { CaSyncOutcome } from "@/lib/db/academic-records";
 import { writeAuditLog } from "@/lib/db/lessons";
+import { getCurrentTermSession } from "@/lib/db/school-settings";
+import { caColumnOf, marksForColumn } from "@/lib/assessment/ca";
 import type { AssignmentSubmission } from "@/types/student-dashboard";
 
 /**
@@ -122,19 +124,31 @@ export async function POST(req: Request) {
   let finalisedCount = 0;
   try {
     // Term AND session, both read off the submission, never resolved now.
-    const finalised = await listFinalisedForSubject(
-      submission.schoolId,
-      submission.studentId,
-      submission.subjectId,
-      submission.term,
-      submission.session,
-      submission.assessmentTypeId
+    const [finalised, settings] = await Promise.all([
+      listFinalisedForSubject(
+        submission.schoolId,
+        submission.studentId,
+        submission.subjectId,
+        submission.term,
+        submission.session
+      ),
+      getCurrentTermSession(submission.schoolId),
+    ]);
+    /**
+     * Only the marks that land in THIS mark's report-card column. Older
+     * assignments with no column of their own land in the admin's column, so
+     * they share an average with newer assignments that chose that same column.
+     */
+    const adminColumn = settings?.lmsAssessmentType ?? null;
+    const withThisOne = marksForColumn(
+      replaceOrAppend(finalised, {
+        ...submission,
+        finalScore,
+        status: "finalised",
+      }),
+      caColumnOf(submission, adminColumn),
+      adminColumn
     );
-    const withThisOne = replaceOrAppend(finalised, {
-      ...submission,
-      finalScore,
-      status: "finalised",
-    });
     finalisedCount = withThisOne.length;
     average = averagePercentage(withThisOne);
   } catch (e) {

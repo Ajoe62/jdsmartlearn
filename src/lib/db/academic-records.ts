@@ -4,7 +4,7 @@ import { JD, SHARED } from "./collections";
 import { assertRecordFields, assertWritable } from "./write-guard";
 import { getCurrentTermSession } from "./school-settings";
 import { getSchool } from "./resultpeak";
-import { decideCaTarget } from "@/lib/assessment/ca";
+import { caScoreId, decideCaTarget, legacyCaScoreId } from "@/lib/assessment/ca";
 import type { CaTarget } from "@/lib/assessment/ca";
 import type { StudentAcademicRecord } from "@/types/student-dashboard";
 
@@ -215,7 +215,8 @@ export async function syncContinuousAssessment(entry: {
  * way: one document per student, subject, session and term, replayable straight
  * back into the shared record.
  *
- * Deterministic id, `set` with merge, so a re-finalisation overwrites rather than
+ * Deterministic id (`caScoreId`: student, subject, session, term and column),
+ * `set` with merge, so a re-finalisation overwrites rather than
  * accumulating. That property matters more than it looks: ResultPeak's own
  * `manualScores` SUMS repeated writes, and a resync there would inflate a child's
  * total. See the handoff requirement in docs/firestore-rules-to-append.md.
@@ -232,15 +233,21 @@ export async function recordCaScore(entry: {
   submissionCount: number;
 }): Promise<void> {
   assertWritable(JD.caScores);
-  const id = [
-    entry.schoolId,
-    entry.studentId,
-    entry.subjectId,
-    entry.session,
-    entry.term,
-    entry.assessmentTypeId,
-  ].join("_");
-  await adminDb
-    .doc(`${JD.caScores}/${encodeURIComponent(id)}`)
-    .set({ ...entry, updatedAt: Date.now() }, { merge: true });
+  const ref = adminDb.doc(`${JD.caScores}/${caScoreId(entry)}`);
+  /**
+   * Retire the copy kept under the OLD id (before the column joined the key),
+   * when it is for this same column: this write supersedes it. Left in place,
+   * a rebuild from this collection would find two scores for one column and
+   * could put the older one back. A legacy copy for a DIFFERENT column is still
+   * that column's only record and is left alone; `npm run migrate:ca-scores`
+   * moves those.
+   */
+  const legacyRef = adminDb.doc(`${JD.caScores}/${legacyCaScoreId(entry)}`);
+  await adminDb.runTransaction(async (tx) => {
+    const legacy = await tx.get(legacyRef);
+    tx.set(ref, { ...entry, updatedAt: Date.now() }, { merge: true });
+    if (legacy.exists && legacy.get("assessmentTypeId") === entry.assessmentTypeId) {
+      tx.delete(legacyRef);
+    }
+  });
 }

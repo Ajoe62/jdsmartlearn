@@ -26,6 +26,7 @@ import {
 import { getCurrentTermSession } from "@/lib/db/school-settings";
 import { isKnownSession, isKnownTerm } from "@/lib/academic-calendar";
 import { ASSIGNMENT_TYPES } from "@/types/student-dashboard";
+import { isTeacherMarkedColumn } from "@/lib/assessment/ca";
 import type { AssignmentType } from "@/types/student-dashboard";
 import type { Lesson, ResultPeakClass } from "@/types";
 
@@ -63,7 +64,7 @@ interface Body {
   term?: string;
   session?: string;
   isActive?: boolean;
-  assessmentTypeId?: string;
+  assessmentTypeId?: string | null;
   opensAt?: number | null;
   closesAt?: number | null;
   /** Staging key of an uploaded question sheet. */
@@ -111,10 +112,10 @@ export async function POST(req: Request) {
   if (!Number.isFinite(dueDate)) return bad("Choose a due date.");
   if (dueDate <= Date.now()) return bad("The due date has already passed. Pick a later one.");
 
-  const assessmentTypeId = body.assessmentTypeId;
-  if (typeof assessmentTypeId !== "string" || !assessmentTypeId) {
-    return bad("Choose a Result-sheet box.");
-  }
+  // Optional ONLY while the school has no column ResultPeak has labelled
+  // teacher-marked; checked against the school record below.
+  const assessmentTypeId =
+    typeof body.assessmentTypeId === "string" && body.assessmentTypeId ? body.assessmentTypeId : null;
   let opensAt: number | null = null;
   let closesAt: number | null = null;
   if ((body.opensAt === null) !== (body.closesAt === null)) {
@@ -206,8 +207,17 @@ export async function POST(req: Request) {
 
   const subject = subjects.find((s) => s.id === subjectId);
   if (!subject) return bad("That subject is not on your school's list.");
-  const box = school?.assessmentTypes?.find((item) => item.value === assessmentTypeId);
-  if (!box || box.teacherMarked === false || box.automated === true || box.systemMarked === true) {
+  /**
+   * The report-card column. Fails closed: only a column ResultPeak has
+   * explicitly labelled teacher-marked may be chosen (isTeacherMarkedColumn).
+   * When the school has none yet, no column is stored and the assignment's
+   * marks go to the column the school admin set in Assessment settings, the
+   * rule older assignments already follow. Never a column the server picked.
+   */
+  const eligible = (school?.assessmentTypes ?? []).filter(isTeacherMarkedColumn);
+  if (assessmentTypeId === null) {
+    if (eligible.length > 0) return bad("Choose a Result-sheet box.");
+  } else if (!eligible.some((item) => item.value === assessmentTypeId)) {
     return bad("Choose a current teacher-marked Result-sheet box for your school.");
   }
 
@@ -269,7 +279,7 @@ export async function POST(req: Request) {
         term,
         session: academicSession,
         isActive,
-        assessmentTypeId,
+        ...(assessmentTypeId ? { assessmentTypeId } : {}),
         opensAt: body.opensAt === null ? null : opensAt,
         closesAt: body.closesAt === null ? null : closesAt,
         ...(sheet ? fileFields(sheet) : {}),

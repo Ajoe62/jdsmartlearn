@@ -15,6 +15,7 @@ import { storageConfigured } from "@/lib/storage/provider";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
 import AwaitingAllocation from "@/components/tutor/AwaitingAllocation";
 import NewAssignmentForm from "./NewAssignmentForm";
+import { isTeacherMarkedColumn } from "@/lib/assessment/ca";
 
 /**
  * "New assignment". Loads the pickers server-side and hands them to a small
@@ -143,7 +144,7 @@ export default async function NewAssignmentPage({
           knownSessions={settings.knownSessions}
           filesAvailable={storageConfigured()}
           assessmentTypes={(school?.assessmentTypes ?? [])
-            .filter((item) => item.teacherMarked !== false && item.automated !== true && item.systemMarked !== true)
+            .filter(isTeacherMarkedColumn)
             .map((item) => ({ value: item.value, label: item.label ?? item.name ?? item.value, maxScore: item.maxScore }))}
         />
       )}

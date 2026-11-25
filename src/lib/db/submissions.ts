@@ -108,8 +108,7 @@ export async function listFinalisedForSubject(
   studentId: string,
   subjectId: string,
   term: string,
-  session: string,
-  assessmentTypeId?: string
+  session: string
 ) {
   const snap = await adminDb
     .collection(JD.submissions)
@@ -121,10 +120,9 @@ export async function listFinalisedForSubject(
     .where("status", "==", "finalised")
     .limit(QUERY_LIMIT)
     .get();
-  return snap.docs
-    .map((d) => ({ id: d.id, ...d.data() }) as AssignmentSubmission)
-    // Missing is legacy and remains part of the old fallback bucket only.
-    .filter((row) => assessmentTypeId ? row.assessmentTypeId === assessmentTypeId : !row.assessmentTypeId);
+  // Every column. The caller narrows to one with marksForColumn(), which groups
+  // by the column a mark actually lands in.
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as AssignmentSubmission);
 }
 
 // ---------------------------------------------------------------------------

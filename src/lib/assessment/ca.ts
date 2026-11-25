@@ -121,3 +121,94 @@ export const CA_SKIP_TEXT: Record<CaSkipReason, string> = {
   nothing_released:
     "No marks have been released yet, so nothing has been sent to report cards.",
 };
+
+// ---------------------------------------------------------------------------
+// Per-assignment report-card columns
+// ---------------------------------------------------------------------------
+
+/** The flags this repo reads on a `schools/{id}.assessmentTypes[]` entry. */
+export type AssessmentColumnFlags = {
+  value: string;
+  teacherMarked?: boolean;
+  automated?: boolean;
+  systemMarked?: boolean;
+};
+
+/**
+ * May a tutor send an assignment's marks into this column?
+ *
+ * FAILS CLOSED. Only a column ResultPeak has EXPLICITLY marked
+ * `teacherMarked: true` qualifies, and an `automated` or `systemMarked` flag
+ * still refuses it. A column with no flags at all is refused: ResultPeak does
+ * not write these flags yet, so treating "unlabelled" as "allowed" offered every
+ * column, the exam included, and homework could land under an exam.
+ *
+ * The ONE test, used by the new-assignment page and by the create route, so the
+ * list a tutor sees and the list the server accepts cannot drift apart.
+ * Contract: docs/resultpeak-scheduled-assignment-boxes-prompt.md.
+ */
+export function isTeacherMarkedColumn(c: AssessmentColumnFlags): boolean {
+  return c.teacherMarked === true && c.automated !== true && c.systemMarked !== true;
+}
+
+/**
+ * The report-card column a finalised mark feeds: the assignment's own column
+ * when it chose one, otherwise the column the school admin set for older
+ * assignments (null when that is unset).
+ */
+export function caColumnOf(
+  row: { assessmentTypeId?: string | null },
+  adminColumn: string | null
+): string | null {
+  return row.assessmentTypeId || adminColumn || null;
+}
+
+/**
+ * The finalised marks that make up ONE column's average.
+ *
+ * Grouped by the column each mark actually lands in, not by whether its
+ * assignment named a column. An older assignment feeding the admin's column
+ * "first_assessment" and a newer one that chose "first_assessment" write to the
+ * SAME place on the report card, so they must be averaged together. Averaged
+ * apart, each finalise overwrote the other and the child's mark flipped between
+ * two numbers depending on which was marked last.
+ */
+export function marksForColumn<T extends { assessmentTypeId?: string | null }>(
+  rows: T[],
+  column: string | null,
+  adminColumn: string | null
+): T[] {
+  return rows.filter((r) => caColumnOf(r, adminColumn) === column);
+}
+
+/**
+ * Document id in `jdCaScores`: one per student, subject, session, term AND
+ * column. The column joined the key when assignments began choosing their own.
+ */
+export function caScoreId(e: {
+  schoolId: string;
+  studentId: string;
+  subjectId: string;
+  session: string;
+  term: string;
+  assessmentTypeId: string;
+}): string {
+  return encodeURIComponent(
+    [e.schoolId, e.studentId, e.subjectId, e.session, e.term, e.assessmentTypeId].join("_")
+  );
+}
+
+/**
+ * The id `jdCaScores` used before the column was part of the key. A document
+ * still under this id holds the score for the column in its own
+ * `assessmentTypeId` field until a write under the new id supersedes it.
+ */
+export function legacyCaScoreId(e: {
+  schoolId: string;
+  studentId: string;
+  subjectId: string;
+  session: string;
+  term: string;
+}): string {
+  return encodeURIComponent([e.schoolId, e.studentId, e.subjectId, e.session, e.term].join("_"));
+}

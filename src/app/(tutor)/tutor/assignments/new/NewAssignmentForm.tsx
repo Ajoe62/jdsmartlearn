@@ -151,7 +151,7 @@ export default function NewAssignmentForm({
     missing.push(classGap === "blocked" ? "choose a class you have subjects in" : "choose a subject");
   }
   if (!due) missing.push("choose a due date");
-  if (!assessmentTypeId) missing.push("choose a Result-sheet box");
+  if (!assessmentTypeId && assessmentTypes.length > 0) missing.push("choose a Result-sheet box");
   if (visibility === "scheduled" && (!opensAt || !closesAt)) missing.push("choose opening and hiding times");
   if (guideLength < MIN_GUIDE) {
     missing.push(
@@ -209,7 +209,7 @@ export default function NewAssignmentForm({
           maxMarks: Number(maxMarks),
           term,
           session,
-          assessmentTypeId,
+          assessmentTypeId: assessmentTypeId || null,
           opensAt: opening,
           closesAt: closing,
           markingGuide: markingGuide.trim(),
@@ -249,18 +249,27 @@ export default function NewAssignmentForm({
         />
       </label>
 
-      <label className="block">
-        <span className="text-sm font-medium">Result-sheet box</span>
-        <select value={assessmentTypeId} onChange={(e) => setAssessmentTypeId(e.target.value)} className={CONTROL}>
-          <option value="">Choose a Result-sheet box</option>
-          {assessmentTypes.map((item) => (
-            <option key={item.value} value={item.value}>
-              {item.label}{typeof item.maxScore === "number" ? ` (${item.maxScore} marks)` : ""}
-            </option>
-          ))}
-        </select>
-        <span className="mt-1 block text-sm text-muted">This decides where the final mark appears on the Resultpeak report sheet.</span>
-      </label>
+      {assessmentTypes.length > 0 ? (
+        <label className="block">
+          <span className="text-sm font-medium">Result-sheet box</span>
+          <select value={assessmentTypeId} onChange={(e) => setAssessmentTypeId(e.target.value)} className={CONTROL}>
+            <option value="">Choose a Result-sheet box</option>
+            {assessmentTypes.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}{typeof item.maxScore === "number" ? ` (${item.maxScore} marks)` : ""}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-sm text-muted">This decides where the final mark appears on the Resultpeak report sheet.</span>
+        </label>
+      ) : (
+        <div className="block">
+          <span className="text-sm font-medium">Result-sheet box</span>
+          <p className="mt-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-muted">
+            Marks from this assignment will go to the report-card column your school admin chose in Assessment settings. Choosing a box for each assignment becomes available once your school marks its teacher-marked columns in Resultpeak.
+          </p>
+        </div>
+      )}
 
       <label className="block">
         <span className="text-sm font-medium">Class</span>

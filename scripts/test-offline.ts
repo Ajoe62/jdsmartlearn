@@ -76,8 +76,13 @@ import {
 } from "../src/lib/assessment/term-session-audit";
 import {
   averagePercentage,
+  caColumnOf,
+  caScoreId,
   decideCaTarget,
   denormalizedFrom,
+  isTeacherMarkedColumn,
+  legacyCaScoreId,
+  marksForColumn,
 } from "../src/lib/assessment/ca";
 import {
   GRADING_ATTEMPT_CAP,
@@ -768,6 +773,39 @@ test("CA recalculation excludes finalised submissions from another term or sessi
   // 2026/2027 would drag it to 53%, and without the term filter further still.
   assert.equal(averagePercentage(scoped), 80);
   assert.equal(averagePercentage(rows), 45);
+});
+
+test("only a column ResultPeak explicitly labelled teacher-marked may be chosen", () => {
+  // Unlabelled is REFUSED: ResultPeak does not write the flags yet, and treating
+  // that as allowed offered the exam column to tutors.
+  assert.equal(isTeacherMarkedColumn({ value: "exam" }), false);
+  assert.equal(isTeacherMarkedColumn({ value: "ca1", teacherMarked: true }), true);
+  assert.equal(isTeacherMarkedColumn({ value: "ca1", teacherMarked: false }), false);
+  assert.equal(isTeacherMarkedColumn({ value: "x", teacherMarked: true, automated: true }), false);
+  assert.equal(isTeacherMarkedColumn({ value: "x", teacherMarked: true, systemMarked: true }), false);
+});
+
+test("older and newer assignments in the same column share one average", () => {
+  const rows = [
+    { id: "old", finalScore: 10, maxMarks: 10 }, // no column: admin's "ca1"
+    { id: "new", assessmentTypeId: "ca1", finalScore: 4, maxMarks: 10 },
+    { id: "other", assessmentTypeId: "ca2", finalScore: 0, maxMarks: 10 },
+  ];
+  const ca1 = marksForColumn(rows, "ca1", "ca1");
+  assert.deepEqual(ca1.map((r) => r.id), ["old", "new"]);
+  assert.equal(averagePercentage(ca1), 70);
+  // Whichever is finalised, it resolves to the same column and the same set.
+  assert.equal(caColumnOf(rows[0], "ca1"), caColumnOf(rows[1], "ca1"));
+  // With no admin column, an older mark is its own (skipped) group, never ca1.
+  assert.deepEqual(marksForColumn(rows, null, null).map((r) => r.id), ["old"]);
+  assert.deepEqual(marksForColumn(rows, "ca1", null).map((r) => r.id), ["new"]);
+});
+
+test("CA score copies are keyed by column, and the old key is recognisable", () => {
+  const e = { schoolId: "s", studentId: "st", subjectId: "m", session: "2025/2026", term: "First Term" };
+  assert.equal(legacyCaScoreId(e), encodeURIComponent("s_st_m_2025/2026_First Term"));
+  assert.equal(caScoreId({ ...e, assessmentTypeId: "ca1" }), encodeURIComponent("s_st_m_2025/2026_First Term_ca1"));
+  assert.notEqual(caScoreId({ ...e, assessmentTypeId: "ca1" }), caScoreId({ ...e, assessmentTypeId: "ca2" }));
 });
 
 test("a submission write that omits a denormalised field is caught", () => {
