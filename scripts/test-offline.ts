@@ -78,7 +78,9 @@ import {
   averagePercentage,
   caColumnOf,
   caScoreId,
+  decideAssignmentColumn,
   decideCaTarget,
+  isAdminColumnAllowed,
   denormalizedFrom,
   isTeacherMarkedColumn,
   legacyCaScoreId,
@@ -799,6 +801,37 @@ test("older and newer assignments in the same column share one average", () => {
   // With no admin column, an older mark is its own (skipped) group, never ca1.
   assert.deepEqual(marksForColumn(rows, null, null).map((r) => r.id), ["old"]);
   assert.deepEqual(marksForColumn(rows, "ca1", null).map((r) => r.id), ["new"]);
+});
+
+test("the admin's column refuses exam and system columns", () => {
+  // Unlabelled school: refused by name, a stopgap until ResultPeak labels.
+  const unlabelled = [
+    { value: "first_assessment", label: "1st CA" },
+    { value: "exam", label: "Exam" },
+    { value: "termly", label: "End of term examination" },
+  ];
+  assert.equal(isAdminColumnAllowed(unlabelled[0], unlabelled), true);
+  assert.equal(isAdminColumnAllowed(unlabelled[1], unlabelled), false);
+  assert.equal(isAdminColumnAllowed(unlabelled[2], unlabelled), false);
+  assert.equal(isAdminColumnAllowed({ value: "ca", automated: true }, unlabelled), false);
+  // Labelled school: strict, only an explicitly teacher-marked column.
+  const labelled = [{ value: "ca1", teacherMarked: true }, { value: "ca2" }];
+  assert.equal(isAdminColumnAllowed(labelled[0], labelled), true);
+  assert.equal(isAdminColumnAllowed(labelled[1], labelled), false);
+  // A saved exam column stops being fed, with its own reason.
+  const t = decideCaTarget({ lmsAssessmentType: "exam" }, ["first_assessment", "exam"], unlabelled);
+  assert.equal(t.status === "skipped" ? t.reason : null, "column_not_allowed");
+  // Without the list, the old behaviour stands.
+  assert.equal(decideCaTarget({ lmsAssessmentType: "exam" }, ["exam"]).status, "ready");
+});
+
+test("an assignment's own column is re-checked at every sync", () => {
+  const cols = [{ value: "ca1", teacherMarked: true }, { value: "ca2", teacherMarked: true, automated: true }];
+  assert.equal(decideAssignmentColumn("ca1", cols).status, "ready");
+  const gone = decideAssignmentColumn("ca9", cols);
+  assert.equal(gone.status === "skipped" ? gone.reason : null, "type_removed");
+  const relabelled = decideAssignmentColumn("ca2", cols);
+  assert.equal(relabelled.status === "skipped" ? relabelled.reason : null, "column_not_allowed");
 });
 
 test("CA score copies are keyed by column, and the old key is recognisable", () => {

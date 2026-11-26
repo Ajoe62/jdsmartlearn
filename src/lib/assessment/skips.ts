@@ -19,7 +19,7 @@
  */
 
 import { CA_SKIP_TEXT, decideCaTarget } from "./ca";
-import type { CaSkipReason } from "./ca";
+import type { AdminColumnInfo, CaSkipReason } from "./ca";
 
 /**
  * Why something is not reaching where it should.
@@ -53,6 +53,7 @@ export const SKIP_ORDER: SkipReason[] = [
   "no_settings",
   "mapping_unset",
   "type_removed",
+  "column_not_allowed",
   "nothing_released",
 ];
 
@@ -63,6 +64,8 @@ export interface SchoolSkipInput {
   settings: { lmsAssessmentType: string | null } | null;
   /** The stable `value` of each type on `schools/{id}.assessmentTypes`. */
   knownAssessmentTypeIds: string[];
+  /** The full column list, so an exam or system column is reported too. */
+  columns?: AdminColumnInfo[];
 }
 
 /**
@@ -81,7 +84,7 @@ export function detectSkips(input: SchoolSkipInput): SkipReason[] {
 
   if (!input.gradingEnabled) active.add("grading_disabled");
 
-  const target = decideCaTarget(input.settings, input.knownAssessmentTypeIds);
+  const target = decideCaTarget(input.settings, input.knownAssessmentTypeIds, input.columns);
   if (target.status === "skipped") active.add(target.reason);
 
   return SKIP_ORDER.filter((reason) => active.has(reason));

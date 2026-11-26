@@ -4,6 +4,7 @@ import { getSchool } from "./resultpeak";
 import { gradingEnabled } from "./grading-sweep";
 import { detectSkips } from "@/lib/assessment/skips";
 import type { SkipReason } from "@/lib/assessment/skips";
+import type { AdminColumnInfo } from "@/lib/assessment/ca";
 
 /**
  * Everything currently stopping one school's marks getting where they belong.
@@ -36,11 +37,12 @@ export async function getSchoolSkips(schoolId: string): Promise<SkipReason[]> {
    * and `type_removed` is how a tutor finds out before a result sheet does.
    */
   const types =
-    (school as { assessmentTypes?: { value: string }[] } | null)?.assessmentTypes ?? [];
+    (school as { assessmentTypes?: AdminColumnInfo[] } | null)?.assessmentTypes ?? [];
 
   return detectSkips({
     gradingEnabled: gradingEnabled(),
     settings,
     knownAssessmentTypeIds: types.map((t) => t.value),
+    columns: types,
   });
 }

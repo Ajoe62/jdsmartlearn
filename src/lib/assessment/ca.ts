@@ -62,7 +62,8 @@ export type CaSkipReason =
   | "mapping_unset"
   | "type_removed"
   | "no_settings"
-  | "nothing_released";
+  | "nothing_released"
+  | "column_not_allowed";
 
 export type CaTarget =
   | { status: "ready"; assessmentTypeId: string }
@@ -87,7 +88,13 @@ export type CaTarget =
  */
 export function decideCaTarget(
   settings: { lmsAssessmentType: string | null } | null,
-  knownAssessmentTypeIds: string[]
+  knownAssessmentTypeIds: string[],
+  /**
+   * The school's full column list. When given, the admin's column must also
+   * pass isAdminColumnAllowed(), so a column chosen before that check existed
+   * (the exam, say) stops being fed instead of being fed forever.
+   */
+  columns?: AdminColumnInfo[]
 ): CaTarget {
   if (!settings) {
     return { status: "skipped", reason: "no_settings", detail: "no school settings" };
@@ -107,6 +114,43 @@ export function decideCaTarget(
       detail: `mapped type "${typeId}" is no longer on the school record`,
     };
   }
+  if (columns) {
+    const column = columns.find((c) => c.value === typeId);
+    if (column && !isAdminColumnAllowed(column, columns)) {
+      return {
+        status: "skipped",
+        reason: "column_not_allowed",
+        detail: `mapped type "${typeId}" is an exam or system column`,
+      };
+    }
+  }
+  return { status: "ready", assessmentTypeId: typeId };
+}
+
+/**
+ * The same decision for an assignment that chose its own column. It was
+ * teacher-marked when the tutor chose it; re-checked at every sync because
+ * ResultPeak may since have removed the column or relabelled it.
+ */
+export function decideAssignmentColumn(
+  typeId: string,
+  columns: AssessmentColumnFlags[]
+): CaTarget {
+  const column = columns.find((c) => c.value === typeId);
+  if (!column) {
+    return {
+      status: "skipped",
+      reason: "type_removed",
+      detail: `assessment type "${typeId}" is no longer on the school record`,
+    };
+  }
+  if (!isTeacherMarkedColumn(column)) {
+    return {
+      status: "skipped",
+      reason: "column_not_allowed",
+      detail: `assessment type "${typeId}" is no longer labelled teacher-marked`,
+    };
+  }
   return { status: "ready", assessmentTypeId: typeId };
 }
 
@@ -120,6 +164,8 @@ export const CA_SKIP_TEXT: Record<CaSkipReason, string> = {
     "Marks are not being sent to report cards yet. A school admin needs to set the current term and session.",
   nothing_released:
     "No marks have been released yet, so nothing has been sent to report cards.",
+  column_not_allowed:
+    "Marks are not reaching report cards. The column they were set to count towards is an exam or system column, which homework must never fill. A school admin needs to choose a coursework column in Assessment settings.",
 };
 
 // ---------------------------------------------------------------------------
@@ -149,6 +195,32 @@ export type AssessmentColumnFlags = {
  */
 export function isTeacherMarkedColumn(c: AssessmentColumnFlags): boolean {
   return c.teacherMarked === true && c.automated !== true && c.systemMarked !== true;
+}
+
+/** A column with the names an admin sees, for the name check below. */
+export type AdminColumnInfo = AssessmentColumnFlags & { label?: string; name?: string };
+
+/**
+ * May the school admin choose this column as the one older assignments feed?
+ *
+ * Looser than isTeacherMarkedColumn ON PURPOSE, because the admin's column
+ * already works for schools today. Requiring the label everywhere would stop
+ * every school's marks at once, before ResultPeak has labelled anything.
+ *
+ *   - A column ResultPeak flags automated, system-marked or not teacher-marked
+ *     is always refused.
+ *   - A school where ResultPeak has labelled ANY column teacher-marked is
+ *     strict: only a labelled column may be chosen.
+ *   - A school with no labels yet: refuse a column whose value or name says
+ *     "exam". THIS IS A STOPGAP, a guess from a name, and it is named as one.
+ *     It stops applying by itself the moment ResultPeak labels the school,
+ *     because the strict rule above takes over. The real fix is the labels:
+ *     docs/resultpeak-scheduled-assignment-boxes-prompt.md.
+ */
+export function isAdminColumnAllowed(c: AdminColumnInfo, all: AssessmentColumnFlags[]): boolean {
+  if (c.automated === true || c.systemMarked === true || c.teacherMarked === false) return false;
+  if (all.some((x) => x.teacherMarked === true)) return c.teacherMarked === true;
+  return ![c.value, c.label, c.name].some((t) => typeof t === "string" && /exam/i.test(t));
 }
 
 /**

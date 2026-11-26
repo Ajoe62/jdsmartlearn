@@ -4,7 +4,13 @@ import { JD, SHARED } from "./collections";
 import { assertRecordFields, assertWritable } from "./write-guard";
 import { getCurrentTermSession } from "./school-settings";
 import { getSchool } from "./resultpeak";
-import { caScoreId, decideCaTarget, legacyCaScoreId } from "@/lib/assessment/ca";
+import {
+  caScoreId,
+  decideAssignmentColumn,
+  decideCaTarget,
+  legacyCaScoreId,
+  type AdminColumnInfo,
+} from "@/lib/assessment/ca";
 import type { CaTarget } from "@/lib/assessment/ca";
 import type { StudentAcademicRecord } from "@/types/student-dashboard";
 
@@ -175,15 +181,14 @@ export async function syncContinuousAssessment(entry: {
    * was valid last term can be pointing at nothing today.
    */
   const school = await getSchool(entry.schoolId);
-  const types = (school as { assessmentTypes?: { value: string }[] } | null)
-    ?.assessmentTypes;
-  const known = Array.isArray(types) ? types.map((t) => t.value) : [];
+  const rawTypes = (school as { assessmentTypes?: AdminColumnInfo[] } | null)?.assessmentTypes;
+  const types = Array.isArray(rawTypes) ? rawTypes : [];
+  const known = types.map((t) => t.value);
 
+  // Either path refuses an exam or system column, re-checked on every sync.
   const target = entry.assessmentTypeId
-    ? (known.includes(entry.assessmentTypeId)
-      ? { status: "ready" as const, assessmentTypeId: entry.assessmentTypeId }
-      : { status: "skipped" as const, reason: "type_removed" as const, detail: `assessment type "${entry.assessmentTypeId}" is no longer on the school record` })
-    : decideCaTarget(settings, known);
+    ? decideAssignmentColumn(entry.assessmentTypeId, types)
+    : decideCaTarget(settings, known, types);
   if (target.status === "skipped") return target;
   const typeId = target.assessmentTypeId;
 

@@ -35,6 +35,7 @@ export default function SchoolSettingsForm({
   current,
   sessions,
   assessmentTypes,
+  blockedColumnLabel = null,
 }: {
   current: {
     term: string;
@@ -44,12 +45,17 @@ export default function SchoolSettingsForm({
   } | null;
   sessions: ObservedSession[];
   assessmentTypes: AssessmentType[];
+  /** The saved column, when it is an exam or system column and now refused. */
+  blockedColumnLabel?: string | null;
 }) {
   const router = useRouter();
   const [term, setTerm] = useState(current?.term ?? "");
   const [session, setSession] = useState(current?.session ?? "");
   const [override, setOverride] = useState(current?.sessionIsOverride ?? false);
-  const [lmsType, setLmsType] = useState(current?.lmsAssessmentType ?? "");
+  // A refused saved column starts blank, so saving cannot resubmit it.
+  const [lmsType, setLmsType] = useState(
+    blockedColumnLabel ? "" : current?.lmsAssessmentType ?? ""
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -179,7 +185,15 @@ export default function SchoolSettingsForm({
                 </option>
               ))}
             </select>
+            {blockedColumnLabel && (
+              <p role="alert" className="mt-1 rounded-lg bg-dangerSoft px-3 py-2 text-sm text-danger">
+                Marks were set to count towards &ldquo;{blockedColumnLabel}&rdquo;, which is an
+                exam or system column, so they are not being sent to report cards. Choose a
+                coursework column and save.
+              </p>
+            )}
             <p className="mt-1 text-sm text-muted">
+              Exam and system columns are not listed: homework must never fill them.
               While this is not set, marks you release stay in JDSmartLearn and are not
               sent to ResultPeak. Nothing is guessed for you: if your school has no
               column for coursework, leave it unset and add one in ResultPeak first.

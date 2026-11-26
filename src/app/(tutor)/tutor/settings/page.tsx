@@ -4,6 +4,7 @@ import { getTutorSession } from "@/lib/auth/tutor";
 import { getSchool } from "@/lib/db/resultpeak";
 import { getCurrentTermSession, observedSessions } from "@/lib/db/school-settings";
 import SchoolSettingsForm from "./SchoolSettingsForm";
+import { isAdminColumnAllowed, type AdminColumnInfo } from "@/lib/assessment/ca";
 import { getSchoolBrand } from "@/lib/branding/school";
 import { resultPeakUrl } from "@/lib/partner-links";
 
@@ -42,9 +43,18 @@ export default async function SchoolSettingsPage() {
   ]);
 
   // ResultPeak's own list, by its stable `value`. Never a default of ours.
-  const assessmentTypes =
-    (school as { assessmentTypes?: { value: string; label: string; maxScore: number }[] } | null)
+  const allTypes =
+    (school as { assessmentTypes?: (AdminColumnInfo & { label: string; maxScore: number })[] } | null)
       ?.assessmentTypes ?? [];
+  // Exam and system columns are never offered (isAdminColumnAllowed).
+  const assessmentTypes = allTypes
+    .filter((t) => isAdminColumnAllowed(t, allTypes))
+    .map((t) => ({ value: t.value, label: t.label, maxScore: t.maxScore }));
+  // A column chosen before this check existed, now refused: say so, by name.
+  const savedType = current?.lmsAssessmentType ?? null;
+  const blocked = savedType && !assessmentTypes.some((t) => t.value === savedType)
+    ? allTypes.find((t) => t.value === savedType) ?? null
+    : null;
 
   return (
     <main className="mx-auto max-w-readable px-5 py-10">
@@ -70,6 +80,7 @@ export default async function SchoolSettingsPage() {
         }
         sessions={sessions}
         assessmentTypes={assessmentTypes}
+        blockedColumnLabel={blocked ? (blocked.label ?? blocked.value) : null}
       />
 
       {brand && (

@@ -4,6 +4,7 @@ import { getSchool } from "@/lib/db/resultpeak";
 import { observedSessions, saveSchoolSettings } from "@/lib/db/school-settings";
 import { writeAuditLog } from "@/lib/db/lessons";
 import { isKnownTerm } from "@/lib/academic-calendar";
+import { isAdminColumnAllowed, type AdminColumnInfo } from "@/lib/assessment/ca";
 
 /**
  * Save a school's assessment settings. SCHOOL ADMIN ONLY.
@@ -69,11 +70,15 @@ export async function POST(req: Request) {
   let lmsAssessmentType: string | null = null;
   if (body.lmsAssessmentType) {
     const school = await getSchool(session.schoolId);
-    const types = (school as { assessmentTypes?: { value: string }[] } | null)
-      ?.assessmentTypes;
-    const known = Array.isArray(types) ? types.map((t) => t.value) : [];
-    if (!known.includes(body.lmsAssessmentType)) {
+    const raw = (school as { assessmentTypes?: AdminColumnInfo[] } | null)?.assessmentTypes;
+    const types = Array.isArray(raw) ? raw : [];
+    const column = types.find((t) => t.value === body.lmsAssessmentType);
+    if (!column) {
       return bad("That assessment type is not on your school's list in ResultPeak.");
+    }
+    // Same rule the settings page uses to build its list, and the sync re-checks.
+    if (!isAdminColumnAllowed(column, types)) {
+      return bad("That column is for exams or system marks. Choose a coursework column.");
     }
     lmsAssessmentType = body.lmsAssessmentType;
   }
