@@ -4,11 +4,7 @@ import { getStudentSession } from "@/lib/auth/student";
 import { getAssignment, toStudentAssignment } from "@/lib/db/assignments";
 import { isAssignmentVisibleToStudent } from "@/lib/assignments/availability";
 import type { Assignment } from "@/types/student-dashboard";
-import {
-  buildAssignmentList,
-  listSubmissionsForStudent,
-  toStudentSubmissionPayload,
-} from "@/lib/db/submissions";
+import { loadAssignmentsForStudent, toStudentSubmissionPayload } from "@/lib/db/submissions";
 
 /**
  * Everything this student's phone needs to show their work offline.
@@ -29,10 +25,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
   }
 
-  const [list, submissions] = await Promise.all([
-    buildAssignmentList(session.schoolId, session.classId, session.studentId),
-    listSubmissionsForStudent(session.schoolId, session.studentId),
-  ]);
+  // One cached class query and ONE read of this student's work. This used to
+  // read the student's work twice per sync, once inside the list and once here.
+  const { items: list, submissions } = await loadAssignmentsForStudent(
+    session.schoolId,
+    session.classId,
+    session.studentId
+  );
 
   /**
    * Instructions and accepted file types come from the assignment document, which

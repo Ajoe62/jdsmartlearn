@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/Button";
 import { formatBytes } from "@/lib/format";
 import { queueMark } from "@/lib/offline/tutor-marks";
 import { GRADING_ATTEMPT_CAP, SWEEPABLE_STATUSES } from "@/lib/assessment/grading-recovery";
+import { caNeedsResend } from "@/lib/assessment/marking";
+import type { CaSyncRecord } from "@/lib/assessment/marking";
+import { CA_SKIP_TEXT } from "@/lib/assessment/ca";
 import type { SubmissionFilter, TutorSubmissionRow } from "@/types/student-dashboard";
 
 /**
@@ -108,6 +111,11 @@ export default function SubmissionReview({
                     Sent {new Date(row.submittedAt).toDateString()} &middot;{" "}
                     {statusText(row.status)}
                   </span>
+                  {row.status === "finalised" && caNeedsResend(row.caSync) && (
+                    <span className="mt-1 block text-sm font-medium text-warn">
+                      Not on the report card yet
+                    </span>
+                  )}
                 </span>
                 <span className="shrink-0 text-right text-sm">
                   {row.status === "finalised" ? (
@@ -175,7 +183,42 @@ function ReviewPanel({
   const [retrying, setRetrying] = useState(false);
   const [retryNote, setRetryNote] = useState<string | null>(null);
 
+  const [resending, setResending] = useState(false);
+  const [resendNote, setResendNote] = useState<string | null>(null);
+  const [sentRecord, setSentRecord] = useState<CaSyncRecord | null>(null);
+
   const released = row.status === "finalised";
+
+  /**
+   * Send a released mark to the report card again. Online only: it changes no
+   * mark, so there is nothing worth queueing, and the answer is what matters.
+   */
+  async function resend() {
+    setResending(true);
+    setResendNote(null);
+    try {
+      const res = await fetch("/api/tutor/finalise-assignment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionId: row.submissionId, action: "resend" }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        caSync?: CaSyncRecord;
+      };
+      if (!res.ok) throw new Error(data.error ?? "We couldn't send it just now. Try again.");
+      if (data.caSync) setSentRecord(data.caSync);
+      router.refresh();
+    } catch (err) {
+      setResendNote(
+        err instanceof Error && navigator.onLine
+          ? err.message
+          : "You're offline. Connect to the internet and try again."
+      );
+    } finally {
+      setResending(false);
+    }
+  }
 
   async function retry() {
     setRetrying(true);
@@ -375,10 +418,18 @@ function ReviewPanel({
       )}
 
       {released ? (
-        <p className="mt-4 text-sm text-muted">
-          Released on {row.finalScore !== null ? `${row.finalScore} / ${maxMarks}` : ""}.
-          Your student can see this mark.
-        </p>
+        <>
+          <p className="mt-4 text-sm text-muted">
+            Released{row.finalScore !== null ? ` at ${row.finalScore} / ${maxMarks}` : ""}.
+            Your student can see this mark.
+          </p>
+          <ReportCardStatus
+            record={sentRecord ?? row.caSync}
+            busy={resending}
+            note={resendNote}
+            onResend={() => void resend()}
+          />
+        </>
       ) : (
         <div className="mt-5 flex flex-wrap gap-3">
           <Button disabled={busy} onClick={() => void save("finalise")}>
@@ -402,6 +453,53 @@ function PlainList({ title, items }: { title: string; items: string[] }) {
           <li key={item}>{item}</li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Whether a released mark reached the report card, in plain words, with a way
+ * to send it again when it did not. Before this, a failed send left no trace
+ * a tutor could see.
+ */
+function ReportCardStatus({
+  record,
+  busy,
+  note,
+  onResend,
+}: {
+  record: CaSyncRecord | null;
+  busy: boolean;
+  note: string | null;
+  onResend: () => void;
+}) {
+  // Released before this record existed: say nothing rather than guess.
+  if (!record) return null;
+
+  if (record.status === "written") {
+    return <p className="mt-1 text-sm text-muted">Sent to the report card.</p>;
+  }
+
+  if (!caNeedsResend(record)) return null;
+
+  const why =
+    record.status === "failed"
+      ? "Sending it to the report card didn't work. Your student can still see the mark."
+      : CA_SKIP_TEXT[record.reason ?? "mapping_unset"];
+
+  return (
+    <div role="status" className="mt-3 rounded-lg border border-line bg-canvas p-3 text-sm">
+      <p className="font-medium text-warn">Not on the report card yet</p>
+      <p className="mt-1">{why}</p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onResend}
+        className="mt-2 font-medium text-brand disabled:opacity-60"
+      >
+        {busy ? "Sending" : "Send to report card again"}
+      </button>
+      {note && <p className="mt-2">{note}</p>}
     </div>
   );
 }

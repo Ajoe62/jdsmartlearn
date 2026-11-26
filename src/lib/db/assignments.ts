@@ -1,6 +1,7 @@
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
-import { JD, LIST_LIMIT, QUERY_LIMIT } from "./collections";
+import { JD, QUERY_LIMIT } from "./collections";
+import { reportIfCapped } from "@/lib/list-cap";
 import { assertWritable } from "./write-guard";
 import type { Assignment } from "@/types/student-dashboard";
 import { isAssignmentSubmittable, isAssignmentVisibleToStudent, SUBMISSION_GRACE_MS } from "@/lib/assignments/availability";
@@ -88,7 +89,25 @@ export async function listAssignmentsInClass(filter: {
 }
 
 /**
- * Active assignments a class can see. Three equality filters, no orderBy.
+ * Active assignments a class can see, in ONE school year. Equality filters
+ * only, no orderBy, so no composite index (verified against the live project
+ * on 2026-11-26).
+ *
+ * WHY THE SCHOOL YEAR, AND WHY NOT THE TERM (2026-11-26). This used to read at
+ * most 50 with no ordering and no year filter. Firestore then returns an
+ * arbitrary 50, so once a class passed 50 (future scheduled work counts too),
+ * work due tomorrow could silently drop off a child's screen.
+ *
+ *   - Filtering by `session` keeps earlier years from filling the list.
+ *   - NOT by the current term: holiday work for next term is set, opened and
+ *     done while the school is still in this term (Mt Cedar, December 2026).
+ *     A term filter would hide every holiday assignment.
+ *   - The limit is QUERY_LIMIT, not LIST_LIMIT: a whole year of one class.
+ *     The phone still receives only what is visible now, filtered below.
+ *
+ * `session` is ResultPeak's current session, verbatim. Null (the school has not
+ * set its term in School profile) reads without the year filter, as before,
+ * rather than showing nothing. A full result is logged by reportIfCapped.
  *
  * Returns the FULL documents, marking guide included, so every caller on a
  * student path must project through toStudentAssignment() before responding.
@@ -96,16 +115,18 @@ export async function listAssignmentsInClass(filter: {
 export async function listActiveAssignmentsForClass(
   schoolId: string,
   classId: string,
+  session: string | null,
   now = Date.now(),
   includeUnavailable = false
 ) {
-  const snap = await adminDb
+  let q = adminDb
     .collection(JD.assignments)
     .where("schoolId", "==", schoolId)
     .where("classId", "==", classId)
-    .where("isActive", "==", true)
-    .limit(LIST_LIMIT)
-    .get();
+    .where("isActive", "==", true);
+  if (session) q = q.where("session", "==", session);
+  const snap = await q.limit(QUERY_LIMIT).get();
+  reportIfCapped(snap.docs, "class assignments", QUERY_LIMIT, { schoolId, classId, session });
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as Assignment)
     .filter((assignment) => includeUnavailable || isAssignmentVisibleToStudent(assignment, now))

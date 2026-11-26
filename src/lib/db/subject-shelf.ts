@@ -1,7 +1,6 @@
 import "server-only";
 import { getClassSyncBundle } from "./student-content";
-import { listActiveAssignmentsForClass } from "./assignments";
-import { listSubmissionsForStudent } from "./submissions";
+import { loadAssignmentsForStudent } from "./submissions";
 import { listPublishedSchemesForClass } from "./schemes";
 import { getClassSubjects, isDerivedFromContentOnly } from "./class-subjects";
 import { termOrder } from "@/lib/academic-calendar";
@@ -64,12 +63,19 @@ export async function getSubjectShelf(
   studentId: string,
   filter: TermFilter = ALL_TERMS
 ): Promise<SubjectShelf> {
-  const [bundle, assignmentDocs, submissionDocs, schemeDocs] = await Promise.all([
-    getClassSyncBundle(schoolId, classId),
-    listActiveAssignmentsForClass(schoolId, classId),
-    listSubmissionsForStudent(schoolId, studentId),
-    listPublishedSchemesForClass(schoolId, classId),
-  ]);
+  /**
+   * Assignments come from the CACHED class list, the same one the assignments
+   * page uses. Until 2026-11-26 this called the uncached query directly, so
+   * every child opening the shelf ran their own class query (with every
+   * marking guide in it), despite the comment above saying it was shared.
+   * The student's submissions are read for the same school year as the list.
+   */
+  const [bundle, { items: assignmentItems, submissions: submissionDocs }, schemeDocs] =
+    await Promise.all([
+      getClassSyncBundle(schoolId, classId),
+      loadAssignmentsForStudent(schoolId, classId, studentId),
+      listPublishedSchemesForClass(schoolId, classId),
+    ]);
 
   const lessons: ShelfLesson[] = bundle.map((l) => ({
     lessonId: l.lessonId,
@@ -80,8 +86,9 @@ export async function getSubjectShelf(
     session: l.session,
   }));
 
-  const assignments: ShelfAssignment[] = assignmentDocs.map((a) => ({
-    assignmentId: a.id,
+  // Already filtered to what the student may see now, as before.
+  const assignments: ShelfAssignment[] = assignmentItems.map((a) => ({
+    assignmentId: a.assignmentId,
     subjectId: a.subjectId,
     dueDate: a.dueDate,
     term: a.term,

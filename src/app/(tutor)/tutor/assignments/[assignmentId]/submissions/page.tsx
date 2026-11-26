@@ -111,6 +111,8 @@ export default async function SubmissionsPage({
     gradingAttempts: s.gradingAttempts ?? 0,
     lastGradingAttemptAt: s.lastGradingAttemptAt ?? s.submittedAt,
     updatedAt: s.updatedAt,
+    // Absent on marks released before 2026-11-26, which reads as "unknown".
+    caSync: s.caSync ?? null,
   }));
 
   const details = Object.fromEntries(

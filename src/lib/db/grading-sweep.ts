@@ -11,6 +11,8 @@ import {
   staleThresholdMs,
 } from "@/lib/assessment/grading-recovery";
 import type { SweepCandidate } from "@/lib/assessment/grading-recovery";
+import { aiMayWrite, mayClaimAttempt } from "@/lib/assessment/marking";
+import { updateSubmissionWhen } from "./submissions";
 import type { AssignmentSubmission } from "@/types/student-dashboard";
 
 /**
@@ -88,6 +90,29 @@ function toCandidate(s: AssignmentSubmission): SweepCandidate {
   };
 }
 
+/**
+ * Claim one more marking attempt, atomically. Returns the claimed submission,
+ * or null when it is no longer waiting or another caller claimed it first.
+ */
+async function claimAttempt(
+  id: string,
+  expectedAttempts: number,
+  attempt: number
+): Promise<AssignmentSubmission | null> {
+  assertWritable(JD.submissions);
+  const ref = adminDb.doc(`${JD.submissions}/${id}`);
+  return adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return null;
+    const current = { id: snap.id, ...snap.data() } as AssignmentSubmission;
+    if (!mayClaimAttempt(current, expectedAttempts)) return null;
+    const now = Date.now();
+    const patch = { status: "ai_grading" as const, gradingAttempts: attempt, lastGradingAttemptAt: now, updatedAt: now };
+    tx.update(ref, patch);
+    return { ...current, ...patch };
+  });
+}
+
 export interface SweepResult {
   /** How many were re-sent for marking. */
   retried: number;
@@ -125,13 +150,20 @@ export async function sweepAssignment(
    * tutor sees work that is theirs, rather than a row that quietly stopped being
    * retried while still claiming to be in progress.
    */
+  /**
+   * EVERY WRITE BELOW IS CONDITIONAL, re-checked inside its own transaction.
+   *
+   * `rows` was read once, at the start. The loop then waits 20 to 40 seconds
+   * per row for the model, so by row five the list is minutes old, and the
+   * tutor is looking at the same rows on the page that started this sweep, with
+   * a live Release button. A blind write here used to flip a mark the tutor had
+   * just released back to "ai_grading". See lib/assessment/marking.ts.
+   */
   const exhausted = selectExhausted(rows, opts);
   for (const row of exhausted) {
-    assertWritable(JD.submissions);
-    await adminDb
-      .doc(`${JD.submissions}/${row.id}`)
-      .update({ status: "ai_grading_failed", updatedAt: Date.now() })
-      .catch(() => undefined);
+    await updateSubmissionWhen(row.id, (s) => aiMayWrite(s.status), {
+      status: "ai_grading_failed",
+    }).catch(() => false);
   }
 
   const stuck = selectStuck(rows, opts);
@@ -139,23 +171,17 @@ export async function sweepAssignment(
 
   for (const row of stuck) {
     const attempt = row.gradingAttempts + 1;
+    let data: AssignmentSubmission | null = null;
     try {
       // Claim the attempt BEFORE triggering. If this instance dies immediately
       // after, the count has still moved, so the cap cannot be bypassed by
-      // repeatedly killing the sweep.
-      assertWritable(JD.submissions);
-      await adminDb.doc(`${JD.submissions}/${row.id}`).update({
-        status: "ai_grading",
-        gradingAttempts: attempt,
-        lastGradingAttemptAt: Date.now(),
-        updatedAt: Date.now(),
-      });
+      // repeatedly killing the sweep. Claimed only if the row is still waiting
+      // AND still on the attempt we read, so two sweeps (two tutors opening the
+      // page together) cannot both claim it and spend the quota twice.
+      data = await claimAttempt(row.id, row.gradingAttempts, attempt);
     } catch {
       continue;
     }
-
-    const full = await adminDb.doc(`${JD.submissions}/${row.id}`).get();
-    const data = full.data() as AssignmentSubmission | undefined;
     if (!data) continue;
 
     try {
@@ -215,13 +241,10 @@ export async function retryOne(
     return { ok: false, reason: "not_stuck" };
   }
 
-  assertWritable(JD.submissions);
-  await adminDb.doc(`${JD.submissions}/${submissionId}`).update({
-    status: "ai_grading",
-    gradingAttempts: attempts + 1,
-    lastGradingAttemptAt: Date.now(),
-    updatedAt: Date.now(),
-  });
+  // Conditional, like the sweep: the tutor may have released it, or a sweep
+  // claimed this attempt, since the read above.
+  const claimed = await claimAttempt(submissionId, attempts, attempts + 1);
+  if (!claimed) return { ok: false, reason: "not_stuck" };
 
   try {
     await fetch(new URL("/api/ai/grade-assignment", origin), {

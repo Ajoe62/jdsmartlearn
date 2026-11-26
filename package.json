@@ -18,13 +18,16 @@
     "diagnose:tutor": "tsx scripts/diagnose-tutor.ts",
     "diagnose:terms": "tsx scripts/diagnose-term-session.ts",
     "diagnose:allocations": "tsx scripts/diagnose-allocations.ts",
+    "diagnose:ca-gaps": "tsx scripts/diagnose-ca-gaps.ts",
     "migrate:ca-scores": "tsx scripts/migrate-ca-scores.ts",
     "refresh:class-names": "tsx scripts/refresh-class-names.ts",
     "report:purge": "tsx scripts/purge-report.ts",
     "list:tutors": "tsx scripts/list-tutors.ts",
     "list:students": "tsx scripts/list-students.ts",
     "test:notes": "tsx --test scripts/test-notes.ts",
-    "test:tutor-shelf": "tsx --test scripts/test-tutor-shelf.ts"
+    "test:tutor-shelf": "tsx --test scripts/test-tutor-shelf.ts",
+    "test:marking": "tsx --test scripts/test-marking.ts",
+    "test:lists": "tsx --test scripts/test-list-limits.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1093.0",

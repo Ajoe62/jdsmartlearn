@@ -17,6 +17,7 @@
  */
 
 import type { AcademicSession, AcademicTerm } from "@/lib/academic-calendar";
+import type { CaSyncRecord } from "@/lib/assessment/marking";
 
 /**
  * Term and session are `string`, never a number and never an enum.
@@ -315,6 +316,13 @@ export interface AssignmentSubmission {
   finalisedAt: number | null;
 
   /**
+   * Whether the released mark reached the report card. Absent before it was
+   * released, and on marks released before 2026-11-26. Tutor-only: the student
+   * projection never reads it. See lib/assessment/marking.ts.
+   */
+  caSync?: CaSyncRecord;
+
+  /**
    * Guards an offline-queued mark against a submission that moved on while the
    * tutor was away. Routes return 409 when this does not match, same contract as
    * the lesson patch and publish routes.
@@ -589,6 +597,8 @@ export interface TutorSubmissionRow {
   gradingAttempts: number;
   lastGradingAttemptAt: number;
   updatedAt: number;
+  /** Whether the released mark reached the report card; null when unknown. */
+  caSync: CaSyncRecord | null;
 }
 
 /** Header above the tutor submission table. */

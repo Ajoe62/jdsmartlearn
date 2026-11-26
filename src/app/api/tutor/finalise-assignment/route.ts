@@ -1,28 +1,34 @@
 import { NextResponse } from "next/server";
+import { adminDb } from "@/lib/firebase/admin";
+import { JD } from "@/lib/db/collections";
+import { assertWritable } from "@/lib/db/write-guard";
 import { getTutorSession, assertClassAccess } from "@/lib/auth/tutor";
 import { getAssignment } from "@/lib/db/assignments";
-import {
-  averagePercentage,
-  getSubmission,
-  listFinalisedForSubject,
-  updateSubmission,
-} from "@/lib/db/submissions";
+import { getSubmission } from "@/lib/db/submissions";
 import { getProgress, progressId, upsertProgress } from "@/lib/db/progress";
-import { syncContinuousAssessment } from "@/lib/db/academic-records";
-import type { CaSyncOutcome } from "@/lib/db/academic-records";
+import { sendMarkToReportCard } from "@/lib/db/ca-sync";
 import { writeAuditLog } from "@/lib/db/lessons";
-import { getColumnSetting } from "@/lib/db/school-settings";
-import { caColumnOf, marksForColumn } from "@/lib/assessment/ca";
+import { decideMarkingWrite } from "@/lib/assessment/marking";
+import type { MarkingDecision, MarkingRequest } from "@/lib/assessment/marking";
 import type { AssignmentSubmission } from "@/types/student-dashboard";
 
 /**
- * Save a mark, or release it to the student.
+ * Save a mark, release it, or send a released mark to the report card again.
  *
  *   action=draft     store the tutor's mark, keep it hidden
- *   action=finalise  release it, and sync the subject's CA score to ResultPeak
+ *   action=finalise  release it, and send the subject's CA score to ResultPeak
+ *   action=resend    send an already released mark to the report card again
  *
  * Finalising is the ONLY way a score becomes student-visible. Nothing about a
  * high AI confidence shortcuts it (CLAUDE.md, Assessment rules).
+ *
+ * TWO GUARANTEES, both added 2026-11-26 (see lib/assessment/marking.ts):
+ *
+ *  1. The version check and the write are ONE transaction. A release is final:
+ *     a draft cannot un-release it and a late AI result cannot overwrite it.
+ *  2. Sending to the report card never throws away the outcome. Success, skip
+ *     or failure is recorded on the submission, and a failure is offered back
+ *     to the tutor as "Send to report card again" instead of disappearing.
  */
 
 function bad(message: string, status = 400) {
@@ -31,7 +37,7 @@ function bad(message: string, status = 400) {
 
 interface Body {
   submissionId?: string;
-  action?: "draft" | "finalise";
+  action?: "draft" | "finalise" | "resend";
   teacherScore?: number | null;
   teacherComment?: string | null;
   /** The submission's updatedAt when the tutor started marking. */
@@ -46,6 +52,9 @@ export async function POST(req: Request) {
   const id = body.submissionId?.trim() ?? "";
   const action = body.action ?? "finalise";
   if (!id) return bad("We couldn't tell which submission this is.");
+  if (action !== "draft" && action !== "finalise" && action !== "resend") {
+    return bad("Unknown action.");
+  }
 
   const submission = await getSubmission(id);
   if (!submission || submission.schoolId !== session.schoolId) {
@@ -67,18 +76,19 @@ export async function POST(req: Request) {
     return bad("You don't teach that class.", 403);
   }
 
-  /**
-   * A mark queued offline days ago must not clobber one saved since. Same 409
-   * contract as the lesson patch and publish routes.
-   */
-  if (body.baseUpdatedAt !== undefined && body.baseUpdatedAt !== submission.updatedAt) {
-    return NextResponse.json(
-      {
-        error:
-          "This submission changed after you marked it. Open it again to see the newer version.",
-      },
-      { status: 409 }
-    );
+  // ----- Resend: no change to the mark, only the report-card send. -----
+  if (action === "resend") {
+    if (submission.status !== "finalised" || submission.finalScore === null) {
+      return bad("Release this mark first. Only released marks go to report cards.", 409);
+    }
+    const { record, average } = await sendMarkToReportCard(submission, session.uid);
+    return NextResponse.json({
+      ok: true,
+      released: true,
+      finalScore: submission.finalScore,
+      continuousAssessment: average,
+      caSync: record,
+    });
   }
 
   const teacherScore =
@@ -86,134 +96,78 @@ export async function POST(req: Request) {
       ? null
       : Math.max(0, Math.min(assignment.maxMarks, Math.round(Number(body.teacherScore))));
 
-  if (body.teacherScore !== null && body.teacherScore !== undefined && teacherScore === null) {
+  if (
+    body.teacherScore !== null &&
+    body.teacherScore !== undefined &&
+    !Number.isFinite(Number(body.teacherScore))
+  ) {
     return bad(`Enter a mark between 0 and ${assignment.maxMarks}.`);
   }
 
-  const teacherComment = body.teacherComment?.trim() || null;
+  const request: MarkingRequest = {
+    action,
+    teacherScore,
+    teacherComment: body.teacherComment?.trim() || null,
+    baseUpdatedAt: typeof body.baseUpdatedAt === "number" ? body.baseUpdatedAt : undefined,
+  };
 
-  // ----- Draft: store the mark, release nothing. -----
-  if (action === "draft") {
-    await updateSubmission(id, {
-      status: "teacher_reviewed",
-      teacherScore,
-      teacherComment,
+  // ----- 2. Decide and write in ONE transaction, on the newest copy. -----
+  assertWritable(JD.submissions);
+  const ref = adminDb.doc(`${JD.submissions}/${id}`);
+  let decision: MarkingDecision;
+  let stored: AssignmentSubmission;
+  try {
+    ({ decision, stored } = await adminDb.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new GoneError();
+      const current = { id: snap.id, ...snap.data() } as AssignmentSubmission;
+      const now = Date.now();
+      const d = decideMarkingWrite(current, request, now);
+      if (d.kind === "write") {
+        tx.update(ref, { ...d.patch, updatedAt: now });
+        return { decision: d, stored: { ...current, ...d.patch, updatedAt: now } };
+      }
+      return { decision: d, stored: current };
+    }));
+  } catch (e) {
+    if (e instanceof GoneError) return bad("That submission no longer exists.", 404);
+    throw e;
+  }
+
+  if (decision.kind === "refuse") return bad(decision.error, decision.status);
+
+  if (decision.kind === "already_released") {
+    // A replay of a release that already landed. Nothing changes; report what
+    // is stored, including whether it reached the report card.
+    return NextResponse.json({
+      ok: true,
+      released: true,
+      alreadyReleased: true,
+      finalScore: decision.finalScore,
+      caSync: stored.caSync ?? null,
     });
+  }
+
+  if (!decision.releases) {
     return NextResponse.json({ ok: true, released: false });
   }
 
-  // ----- 2. Finalise. -----
-  const finalScore = teacherScore ?? submission.aiScore;
-  if (finalScore === null) {
-    return bad("Enter a mark before you release this. There is no AI mark to fall back on.");
-  }
+  const finalScore = stored.finalScore as number;
 
-  const finalisedAt = Date.now();
-  await updateSubmission(id, {
-    status: "finalised",
-    teacherScore,
-    teacherComment,
-    finalScore,
-    finalisedAt,
-  });
+  // ----- 3 and 4. The running CA average for this column, sent to ResultPeak.
+  // Never throws: the outcome is recorded on the submission either way. -----
+  const { record, average } = await sendMarkToReportCard(stored, session.uid);
 
-  // ----- 3. The running CA average for this subject this term. -----
-  // Recomputed from the finalised submissions rather than incremented, so a
-  // re-finalise or a corrected mark converges instead of drifting.
-  let average: number | null = null;
-  let finalisedCount = 0;
-  try {
-    // Term AND session, both read off the submission, never resolved now.
-    const [finalised, settings] = await Promise.all([
-      listFinalisedForSubject(
-        submission.schoolId,
-        submission.studentId,
-        submission.subjectId,
-        submission.term,
-        submission.session
-      ),
-      getColumnSetting(submission.schoolId),
-    ]);
-    /**
-     * Only the marks that land in THIS mark's report-card column. Older
-     * assignments with no column of their own land in the admin's column, so
-     * they share an average with newer assignments that chose that same column.
-     */
-    const adminColumn = settings.lmsAssessmentType;
-    const withThisOne = marksForColumn(
-      replaceOrAppend(finalised, {
-        ...submission,
-        finalScore,
-        status: "finalised",
-      }),
-      caColumnOf(submission, adminColumn),
-      adminColumn
-    );
-    finalisedCount = withThisOne.length;
-    average = averagePercentage(withThisOne);
-  } catch (e) {
-    console.error(`[finalise] ${id} step=average:`, e);
-  }
-
-  /**
-   * ----- 4. Sync to ResultPeak. Guarded, merged, two fields only. -----
-   *
-   * NO DEFAULT AND NO FALLBACK on the assessment type. If the school has not
-   * mapped one, or the one it mapped has since been removed from its
-   * `assessmentTypes`, the sync is SKIPPED and logged. It is never redirected to
-   * another type.
-   *
-   * That is not caution for its own sake. Some schools have no coursework column
-   * at all: CAPSTONE ACADEMY runs only first_assessment, second_assessment and
-   * exam. Writing into one of those would file a child's homework under a test
-   * they never sat. ResultPeak's own `matchAssessmentType()` refuses the same
-   * substitution, with the same reasoning in its comment.
-   */
-  let caOutcome: CaSyncOutcome = {
-    status: "skipped",
-    reason: "nothing_released",
-    detail: "no finalised marks yet",
-  };
-
-  if (average !== null) {
-    caOutcome = await syncContinuousAssessment({
-      schoolId: submission.schoolId,
-      studentId: submission.studentId,
-      subjectId: submission.subjectId,
-      session: submission.session,
-      term: submission.term,
-      assessmentTypeId: submission.assessmentTypeId,
-      percentage: average,
-      submissionCount: finalisedCount,
-    });
-  }
-
-  if (caOutcome.status === "skipped") {
-    // Never silent. The tutor page reads these audit entries to explain itself.
-    await writeAuditLog({
-      schoolId: submission.schoolId,
-      actorUid: session.uid,
-      action: "assignment.ca.skipped",
-      entityId: id,
-      detail: `reason=${caOutcome.reason} ${caOutcome.detail}`,
-    }).catch((e) => console.error(`[finalise] ${id} step=ca-skip-audit:`, e));
-  }
-
-  // ----- 5. Progress. -----
+  // ----- 5. Progress. Only on a fresh release, so a replay cannot double count.
   try {
     const existing = await getProgress(
       progressId(submission.schoolId, submission.studentId, submission.subjectId)
     );
-    await upsertProgress(
-      submission.schoolId,
-      submission.studentId,
-      submission.subjectId,
-      {
-        subjectName: submission.subjectName,
-        assignmentsGraded: (existing?.assignmentsGraded ?? 0) + 1,
-        averageScore: average,
-      }
-    );
+    await upsertProgress(submission.schoolId, submission.studentId, submission.subjectId, {
+      subjectName: submission.subjectName,
+      assignmentsGraded: (existing?.assignmentsGraded ?? 0) + 1,
+      averageScore: average,
+    });
   } catch (e) {
     console.error(`[finalise] ${id} step=progress:`, e);
   }
@@ -227,28 +181,28 @@ export async function POST(req: Request) {
       entityId: id,
       detail: [
         `final=${finalScore}/${assignment.maxMarks}`,
-        `ai=${submission.aiScore ?? "none"}`,
+        `ai=${stored.aiScore ?? "none"}`,
         // Whether the tutor overrode the AI is the quality metric for marking,
         // exactly as tutorEdited is for generated lessons.
-        `overrode=${teacherScore !== null && teacherScore !== submission.aiScore}`,
+        `overrode=${teacherScore !== null && teacherScore !== stored.aiScore}`,
         average === null ? "ca=none" : `ca=${average}`,
+        `report=${record.status}`,
       ].join(" "),
     });
   } catch (e) {
     console.error(`[finalise] ${id} step=audit:`, e);
   }
 
-  return NextResponse.json({ ok: true, released: true, finalScore, continuousAssessment: average });
+  return NextResponse.json({
+    ok: true,
+    released: true,
+    finalScore,
+    continuousAssessment: average,
+    caSync: record,
+  });
 }
 
-/** The just-finalised submission may or may not be in the query's results yet. */
-function replaceOrAppend(
-  rows: AssignmentSubmission[],
-  updated: AssignmentSubmission
-): AssignmentSubmission[] {
-  const without = rows.filter((r) => r.id !== updated.id);
-  return [...without, updated];
-}
+class GoneError extends Error {}
 
 export async function GET() {
   return NextResponse.json({ error: "Method not allowed." }, { status: 405 });

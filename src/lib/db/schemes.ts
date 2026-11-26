@@ -1,7 +1,8 @@
 import "server-only";
 import { unstable_cache, revalidateTag } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
-import { JD, LIST_LIMIT, QUERY_LIMIT } from "./collections";
+import { JD, QUERY_LIMIT } from "./collections";
+import { reportIfCapped } from "@/lib/list-cap";
 import { assertWritable } from "./write-guard";
 import { inlineable } from "@/lib/storage/file-types";
 import type { Scheme, StudentScheme, StudentSchemeSummary } from "@/types/schemes";
@@ -161,8 +162,9 @@ export async function listSchemesForClass(
       "title", "term", "session", "publishedAt", "fileName", "fileSize",
       "fileType", "createdAt", "updatedAt"
     )
-    .limit(LIST_LIMIT)
+    .limit(QUERY_LIMIT)
     .get();
+  reportIfCapped(snap.docs, "class schemes", QUERY_LIMIT, { schoolId, classId });
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as Scheme)
     .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
@@ -188,8 +190,16 @@ export function listPublishedSchemesForClass(schoolId: string, classId: string) 
           "title", "term", "session", "publishedAt", "fileName", "fileSize",
           "fileType", "createdAt", "updatedAt"
         )
-        .limit(LIST_LIMIT)
+        /**
+         * QUERY_LIMIT, not LIST_LIMIT (2026-11-26). Unpublished drafts are
+         * dropped AFTER the query, so under a 50 cap an arbitrary set of drafts
+         * could crowd published schemes off every child's phone. Not narrowed
+         * by school year, because schemes created before terms were stamped
+         * carry none and would vanish.
+         */
+        .limit(QUERY_LIMIT)
         .get();
+      reportIfCapped(snap.docs, "published schemes", QUERY_LIMIT, { schoolId, classId });
       return snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as Scheme)
         .filter((s) => !!s.publishedAt)

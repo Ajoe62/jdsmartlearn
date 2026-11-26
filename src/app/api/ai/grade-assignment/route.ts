@@ -4,7 +4,8 @@ import { gradeSubmission } from "@/lib/ai/provider";
 import type { ImagePart } from "@/lib/ai/provider";
 import { MAX_SUBMISSION_CHARS } from "@/lib/ai/prompt";
 import { getAssignment, writeNotification } from "@/lib/db/assignments";
-import { getSubmission, updateSubmission } from "@/lib/db/submissions";
+import { getSubmission, updateSubmissionWhen } from "@/lib/db/submissions";
+import { aiMayWrite } from "@/lib/assessment/marking";
 import { getProgress, mergeTopics, progressId, removeMastered, upsertProgress } from "@/lib/db/progress";
 import { writeAuditLog } from "@/lib/db/lessons";
 import { getFile } from "@/lib/storage/provider";
@@ -106,7 +107,7 @@ export async function POST(req: Request) {
    * one caller is a cap that leaks.
    */
   if (submission.gradingAttempts > GRADING_ATTEMPT_CAP) {
-    await updateSubmission(id, { status: "ai_grading_failed" }).catch((e) =>
+    await failIfStillWaiting(id).catch((e) =>
       step("cap-status", e)
     );
     return NextResponse.json({ ok: true, skipped: "attempt-cap" });
@@ -123,7 +124,7 @@ export async function POST(req: Request) {
       .get();
     if (today.size >= DAILY_CAP) {
       // Not an error for the student. The tutor marks it by hand.
-      await updateSubmission(id, { status: "ai_grading_failed" }).catch((e) =>
+      await failIfStillWaiting(id).catch((e) =>
         step("cap-status", e)
       );
       return NextResponse.json({ ok: true, skipped: "daily-cap" });
@@ -185,7 +186,7 @@ export async function POST(req: Request) {
   submissionText = submissionText.trim().slice(0, MAX_SUBMISSION_CHARS);
 
   if (!submissionText && images.length === 0) {
-    await updateSubmission(id, { status: "ai_grading_failed" }).catch((e) => step("empty", e));
+    await failIfStillWaiting(id).catch((e) => step("empty", e));
     return NextResponse.json({ ok: true, skipped: "nothing-to-mark" });
   }
 
@@ -213,13 +214,16 @@ export async function POST(req: Request) {
      * "ai_grading" so the sweep picks it up again after the stale threshold.
      */
     const exhausted = submission.gradingAttempts >= GRADING_ATTEMPT_CAP;
-    if (exhausted) {
-      await updateSubmission(id, { status: "ai_grading_failed" }).catch((err) =>
-        step("fail-status", err)
-      );
-    }
     if (!exhausted) {
       return NextResponse.json({ ok: false, retryable: true }, { status: 200 });
+    }
+    const handedOver = await failIfStillWaiting(id).catch((err) => {
+      step("fail-status", err);
+      return false;
+    });
+    // Already marked by the tutor in the meantime: nothing to tell them.
+    if (!handedOver) {
+      return NextResponse.json({ ok: false, error: "grading failed" }, { status: 200 });
     }
     await writeNotification({
       schoolId,
@@ -237,9 +241,17 @@ export async function POST(req: Request) {
   // returning 40 out of 25 would inflate a real child's continuous assessment. -----
   const score = Math.max(0, Math.min(assignment.maxMarks, Math.round(graded.result.score)));
 
-  // ----- 11. Store the mark. From here on, every failure is survivable. -----
+  // ----- 11. Store the mark, ONLY if the work is still waiting for it. -----
+  /**
+   * Marking took 20 to 40 seconds. In that time the tutor may have marked this
+   * by hand and released it. Their decision is final: the check and the write
+   * are one transaction, and a submission that has moved on keeps the tutor's
+   * mark. Writing blindly here is what used to un-release a child's mark.
+   * See lib/assessment/marking.ts.
+   */
+  let stored: boolean;
   try {
-    await updateSubmission(id, {
+    stored = await updateSubmissionWhen(id, (s) => aiMayWrite(s.status), {
       status: "ai_graded",
       aiScore: score,
       aiMaxScore: assignment.maxMarks,
@@ -253,6 +265,29 @@ export async function POST(req: Request) {
   } catch (e) {
     step("save-result", e);
     return NextResponse.json({ ok: false, error: "could not save" }, { status: 500 });
+  }
+
+  if (!stored) {
+    /**
+     * The tutor got there first. The quota WAS spent, so the metric line is
+     * still written: the daily cap counts these lines, and leaving it out would
+     * let discarded results escape the cap.
+     */
+    await writeAuditLog({
+      schoolId,
+      actorUid: "system",
+      action: "assignment.grade",
+      entityId: id,
+      detail: [
+        `model=${graded.meta.model}`,
+        `in=${graded.meta.inputTokens}`,
+        `out=${graded.meta.outputTokens}`,
+        `ms=${graded.meta.latencyMs}`,
+        `usd=${graded.meta.wouldBeCostUsd.toFixed(6)}`,
+        "discarded=tutor_marked_first",
+      ].join(" "),
+    }).catch((e) => step("audit-discarded", e));
+    return NextResponse.json({ ok: true, skipped: "tutor_marked_first" });
   }
 
   // ----- 12. Progress. Topics merge; the average waits for the tutor.
@@ -312,6 +347,16 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ ok: true, score, confidence: graded.result.confidence });
+}
+
+/**
+ * Hand the work to the tutor, but only if it is still waiting for marking.
+ * A tutor who has already marked or released it keeps their decision.
+ */
+async function failIfStillWaiting(id: string): Promise<boolean> {
+  return updateSubmissionWhen(id, (s) => aiMayWrite(s.status), {
+    status: "ai_grading_failed",
+  });
 }
 
 /** POST only. Anything else is not a soft failure, it is the wrong door. */
