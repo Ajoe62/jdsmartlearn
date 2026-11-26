@@ -18,7 +18,7 @@ import {
   formatLimit,
 } from "@/lib/storage/file-types";
 import { readApiError } from "@/lib/upload-client";
-import { RESULTPEAK_TERMS } from "@/lib/academic-calendar";
+import { RESULTPEAK_TERMS, termOrder } from "@/lib/academic-calendar";
 import { ASSIGNMENT_TYPES, ASSIGNMENT_TYPE_LABELS } from "@/types/student-dashboard";
 import type { AssignmentType } from "@/types/student-dashboard";
 
@@ -369,7 +369,8 @@ export default function NewAssignmentForm({
         <label className="block">
           <span className="text-sm font-medium">Term</span>
           <select value={term} onChange={(e) => setTerm(e.target.value)} className={CONTROL}>
-            {RESULTPEAK_TERMS.map((t) => (
+            {/* The current term and later ones. The server refuses an earlier one. */}
+            {RESULTPEAK_TERMS.filter((t) => termOrder(t) >= termOrder(defaultTerm)).map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>
@@ -392,8 +393,8 @@ export default function NewAssignmentForm({
           ))}
         </select>
         <span className="mt-1 block text-sm text-muted">
-          Set by your school admin. Marks count towards this term and session even
-          if the school moves on later.
+          Set in ResultPeak&rsquo;s School profile. Marks count towards this term and
+          session even if the school moves on later.
         </span>
       </label>
 

@@ -28,6 +28,8 @@ import {
   RESULTPEAK_TERMS,
   isKnownSession,
   isKnownTerm,
+  isProfileSession,
+  resolveSchoolCalendar,
   sortSessionsDescending,
   termOrder,
 } from "../src/lib/academic-calendar";
@@ -509,6 +511,38 @@ test("term membership is exact: no trim, no case folding", () => {
   assert.equal(isKnownTerm("Term 1"), false);
   assert.equal(isKnownTerm("1"), false);
   assert.equal(isKnownTerm(""), false);
+});
+
+test("resolveSchoolCalendar reads ResultPeak's School profile, both or neither", () => {
+  assert.deepEqual(
+    resolveSchoolCalendar({ currentTerm: "First Term", currentSession: "2026/2027" }),
+    { term: "First Term", session: "2026/2027" }
+  );
+  // One without the other is not set. Never half a calendar.
+  assert.equal(resolveSchoolCalendar({ currentTerm: "First Term" }), null);
+  assert.equal(resolveSchoolCalendar({ currentSession: "2026/2027" }), null);
+  assert.equal(resolveSchoolCalendar(null), null);
+  // Refused as written, never tidied.
+  for (const bad of [
+    { currentTerm: "first term", currentSession: "2026/2027" },
+    { currentTerm: "First Term ", currentSession: "2026/2027" },
+    { currentTerm: "First Term", currentSession: "2026-27" },
+    { currentTerm: "First Term", currentSession: " 2026/2027" },
+    { currentTerm: "First Term", currentSession: "2026/2028" },
+    { currentTerm: 1, currentSession: "2026/2027" },
+  ]) {
+    assert.equal(resolveSchoolCalendar(bad), null, JSON.stringify(bad));
+  }
+  assert.equal(isProfileSession("2025/2026"), true);
+  assert.equal(isProfileSession("2026/2025"), false);
+});
+
+test("a new assignment may be set for the current term or a later one, never an earlier one", () => {
+  // The rule in POST /api/tutor/assignments and the form's term list.
+  const allowed = (term: string, current: string) => termOrder(term) >= termOrder(current);
+  assert.equal(allowed("Second Term", "Second Term"), true);
+  assert.equal(allowed("Third Term", "Second Term"), true);
+  assert.equal(allowed("First Term", "Second Term"), false);
 });
 
 test("session membership is exact against the school's observed values", () => {

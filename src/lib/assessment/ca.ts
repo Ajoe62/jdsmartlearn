@@ -161,7 +161,7 @@ export const CA_SKIP_TEXT: Record<CaSkipReason, string> = {
   type_removed:
     "Marks are not reaching report cards. The column they were set to count towards no longer exists in ResultPeak. A school admin needs to pick a new one.",
   no_settings:
-    "Marks are not being sent to report cards yet. A school admin needs to set the current term and session.",
+    "Marks are not being sent to report cards yet. A school admin needs to set the current term and session in ResultPeak, under School profile.",
   nothing_released:
     "No marks have been released yet, so nothing has been sent to report cards.",
   column_not_allowed:

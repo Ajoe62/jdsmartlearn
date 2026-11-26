@@ -4,26 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { CONTROL } from "@/components/ui/Field";
-import { RESULTPEAK_TERMS } from "@/lib/academic-calendar";
 
 /**
- * The admin sets term, session, and which assessment column the LMS feeds.
+ * The admin chooses which report-card column older assignments feed.
  *
- * The session is PICKED FROM OBSERVED DATA, not typed. Each option shows how
- * many exams and results carry it and when it was last used, so an admin can
- * see which string their school is really operating under. Free text is behind
- * an explicit toggle with a plain warning, because a session ResultPeak has
- * never used will not appear on any result sheet.
- *
- * Nothing here trims or reshapes what is chosen.
+ * Term and session are not here: they are set in ResultPeak's School profile
+ * and shown read-only on the page above this form.
  */
-
-
-interface ObservedSession {
-  session: string;
-  count: number;
-  lastUsedAt: number | null;
-}
 
 interface AssessmentType {
   value: string;
@@ -33,28 +20,18 @@ interface AssessmentType {
 
 export default function SchoolSettingsForm({
   current,
-  sessions,
   assessmentTypes,
   blockedColumnLabel = null,
 }: {
-  current: {
-    term: string;
-    session: string;
-    sessionIsOverride: boolean;
-    lmsAssessmentType: string | null;
-  } | null;
-  sessions: ObservedSession[];
+  current: { lmsAssessmentType: string | null };
   assessmentTypes: AssessmentType[];
   /** The saved column, when it is an exam or system column and now refused. */
   blockedColumnLabel?: string | null;
 }) {
   const router = useRouter();
-  const [term, setTerm] = useState(current?.term ?? "");
-  const [session, setSession] = useState(current?.session ?? "");
-  const [override, setOverride] = useState(current?.sessionIsOverride ?? false);
   // A refused saved column starts blank, so saving cannot resubmit it.
   const [lmsType, setLmsType] = useState(
-    blockedColumnLabel ? "" : current?.lmsAssessmentType ?? ""
+    blockedColumnLabel ? "" : current.lmsAssessmentType ?? ""
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,12 +45,7 @@ export default function SchoolSettingsForm({
       const res = await fetch("/api/tutor/school-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          term,
-          session,
-          sessionIsOverride: override,
-          lmsAssessmentType: lmsType || null,
-        }),
+        body: JSON.stringify({ lmsAssessmentType: lmsType || null }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "We couldn't save these settings.");
@@ -88,82 +60,6 @@ export default function SchoolSettingsForm({
 
   return (
     <div className="mt-8 space-y-6">
-      <label className="block">
-        <span className="text-sm font-medium">Current term</span>
-        <select value={term} onChange={(e) => setTerm(e.target.value)} className={CONTROL}>
-          <option value="">Choose a term</option>
-          {RESULTPEAK_TERMS.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <div>
-        <span className="text-sm font-medium">Current session</span>
-
-        {override ? (
-          <>
-            <input
-              value={session}
-              onChange={(e) => setSession(e.target.value)}
-              placeholder="2025/2026"
-              className={CONTROL}
-            />
-            <p className="mt-2 rounded-lg border border-line bg-canvas p-3 text-sm">
-              <span className="font-medium">Read this before saving.</span> Your school
-              has never used this session in ResultPeak. Work counted under it will not
-              appear on any result sheet until ResultPeak uses the same session, spelled
-              exactly the same way.
-            </p>
-          </>
-        ) : sessions.length === 0 ? (
-          <p className="mt-1 rounded-lg border border-line bg-surface p-4 text-sm text-muted">
-            No exams or results in ResultPeak yet, so there is no session to match. Turn
-            on the option below to enter one.
-          </p>
-        ) : (
-          <>
-            <select
-              value={session}
-              onChange={(e) => setSession(e.target.value)}
-              className={CONTROL}
-            >
-              <option value="">Choose a session</option>
-              {sessions.map((s) => (
-                <option key={s.session} value={s.session}>
-                  {s.session} ({s.count} record{s.count === 1 ? "" : "s"}
-                  {s.lastUsedAt ? `, last used ${new Date(s.lastUsedAt).toDateString()}` : ""})
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-sm text-muted">
-              These are the sessions your school&rsquo;s own exams and results already
-              use. Pick the one your marks should join.
-            </p>
-          </>
-        )}
-
-        <label className="mt-3 flex items-start gap-3">
-          <input
-            type="checkbox"
-            checked={override}
-            onChange={(e) => {
-              setOverride(e.target.checked);
-              setSession("");
-            }}
-            className="mt-1"
-          />
-          <span className="text-sm">
-            Use a session that is not in my data
-            <span className="block text-muted">
-              Only if your school is starting a new session that has no exams yet.
-            </span>
-          </span>
-        </label>
-      </div>
-
       <div>
         <span className="text-sm font-medium">Which column LMS marks count towards</span>
         {assessmentTypes.length === 0 ? (
@@ -209,13 +105,13 @@ export default function SchoolSettingsForm({
       )}
       {saved && (
         <p role="status" className="rounded-lg border border-line bg-canvas p-3 text-sm">
-          Saved. New assignments will use {term}, {session}.
+          Saved.
         </p>
       )}
 
       <Button
         onClick={() => void save()}
-        disabled={busy || !term || !session}
+        disabled={busy}
         size="lg"
         full
       >

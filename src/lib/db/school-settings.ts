@@ -1,39 +1,41 @@
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
-import { JD, RP, QUERY_LIMIT } from "./collections";
+import { JD, RP } from "./collections";
 import { assertWritable } from "./write-guard";
-import { sortSessionsDescending } from "@/lib/academic-calendar";
+import { resolveSchoolCalendar } from "@/lib/academic-calendar";
 import type { AcademicSession, AcademicTerm } from "@/lib/academic-calendar";
 
 /**
- * Per-school assessment settings.
+ * The current term and session, and the admin's report-card column.
  *
- * THIS IS A STOPGAP AND THE COMMENT IS THE POINT. Term and session are
- * ResultPeak concepts. ResultPeak does not record which term is current
- * anywhere: its terms are a hardcoded array in three frontend files, its
- * sessions are free text defaulted from `new Date().getFullYear()`, and no
- * settings document exists in the shared project. Until ResultPeak owns a
- * current-term field, JDSmartLearn holds one.
+ * TERM AND SESSION ARE RESULTPEAK'S, AND SINCE 2026-11-26 THEY ARE READ FROM
+ * RESULTPEAK. Its School profile saves `schools/{id}.currentTerm` and
+ * `.currentSession`, and its copy of LMS marks onto report cards files by those
+ * same two fields. Until then this repo held its own copy in `jdSchoolSettings`,
+ * and that copy had drifted: on 2026-11-26 CAPSTONE's was a whole session behind
+ * and Mt Cedar's a term ahead. A mark stamped from a stale copy here is filed
+ * under the wrong term over there, so this repo no longer reads or writes its
+ * own term at all. The old `term` and `session` fields are left on the settings
+ * documents untouched and unread.
  *
- * EVERY read of the current term and session goes through
- * `getCurrentTermSession()` below. Nothing else in the codebase may read the
- * setting document directly. When ResultPeak ships its own field, that one
- * function changes and nothing else does.
+ * `jdSchoolSettings` keeps only `lmsAssessmentType`, which is JDSmartLearn's.
  */
 
 export interface SchoolSettings {
   schoolId: string;
-  /** Verbatim from RESULTPEAK_TERMS. Never normalised. */
+  /** Verbatim from `schools/{id}.currentTerm`. Never normalised. */
   term: AcademicTerm;
-  /** Verbatim from the school's own data, or an explicit admin override. */
+  /** Verbatim from `schools/{id}.currentSession`. Never normalised. */
   session: AcademicSession;
   /**
-   * The sessions the admin was offered when they last saved, snapshotted so the
-   * write path can validate without a Firestore query. Always contains `session`.
+   * The sessions new work may be set in: the current one only. Kept as a list
+   * so the assignment form and route keep one shape.
    */
   knownSessions: AcademicSession[];
-  /** True when the admin used the escape hatch to enter an unobserved session. */
-  sessionIsOverride: boolean;
+}
+
+/** The admin's report-card column. JDSmartLearn's own setting. */
+export interface ColumnSetting {
   /**
    * Which of the school's `assessmentTypes` the LMS feeds, by its stable `value`.
    *
@@ -44,105 +46,39 @@ export interface SchoolSettings {
    * refuses. While this is null, CA sync does not run and the tutor is told so.
    */
   lmsAssessmentType: string | null;
-  updatedAt: number;
-  updatedBy: string;
 }
 
 /**
- * THE ONLY read of the current term and session. See the note above.
+ * THE ONLY read of the current term and session, from ResultPeak's School
+ * profile through `resolveSchoolCalendar()`.
  *
- * Returns null when a school admin has not set it yet, which is a real state
- * with its own interface copy, not an error and not a reason to guess.
+ * Returns null when the school has not set both, which is a real state with its
+ * own interface copy, not an error and not a reason to guess. There is no
+ * fallback to an older copy of ours: that copy is what was wrong.
  */
 export async function getCurrentTermSession(
   schoolId: string
 ): Promise<SchoolSettings | null> {
-  const snap = await adminDb.doc(`${JD.schoolSettings}/${schoolId}`).get();
-  return snap.exists ? ({ schoolId, ...snap.data() } as SchoolSettings) : null;
+  const snap = await adminDb.doc(`${RP.schools}/${schoolId}`).get();
+  const calendar = resolveSchoolCalendar(snap.exists ? snap.data() : null);
+  if (!calendar) return null;
+  return { schoolId, ...calendar, knownSessions: [calendar.session] };
 }
 
-export async function saveSchoolSettings(
+/** THE ONLY read of the admin's column. Unset reads as null, never a default. */
+export async function getColumnSetting(schoolId: string): Promise<ColumnSetting> {
+  const snap = await adminDb.doc(`${JD.schoolSettings}/${schoolId}`).get();
+  const value = snap.exists ? snap.get("lmsAssessmentType") : null;
+  return { lmsAssessmentType: typeof value === "string" && value !== "" ? value : null };
+}
+
+/** Saves the admin's column. Merge, so the retired term fields are left alone. */
+export async function saveColumnSetting(
   schoolId: string,
-  patch: Omit<SchoolSettings, "schoolId" | "updatedAt">
+  patch: ColumnSetting & { updatedBy: string }
 ): Promise<void> {
   assertWritable(JD.schoolSettings);
   await adminDb
     .doc(`${JD.schoolSettings}/${schoolId}`)
     .set({ schoolId, ...patch, updatedAt: Date.now() }, { merge: true });
-}
-
-/** One observed academic session, with enough context for an admin to choose. */
-export interface ObservedSession {
-  session: AcademicSession;
-  /** How many exams and results carry it. */
-  count: number;
-  /** Most recent use, epoch ms, or null when neither source carried a date. */
-  lastUsedAt: number | null;
-}
-
-/**
- * The academic sessions this school's ResultPeak data actually contains.
- *
- * COLD PATH ONLY. Two ResultPeak reads, both equality-filtered on `schoolId` and
- * both limited, run when a school admin opens the settings form. Never on a
- * write path, never on a student route.
- *
- * Grounding the admin's choice in observed data rather than in what is
- * calendrically correct is deliberate. ResultPeak's `defaultSession()` returns
- * the NEXT session from January to August, so a school's live results already
- * sit under a session string that is factually wrong. A correct string would not
- * join to them. The string exists to join, not to be right.
- *
- * Reads only. `exams` and `results` are ResultPeak-owned.
- */
-export async function observedSessions(schoolId: string): Promise<ObservedSession[]> {
-  const [exams, results] = await Promise.all([
-    adminDb
-      .collection(RP.exams)
-      .where("schoolId", "==", schoolId)
-      .select("academicSession", "createdAt")
-      .limit(QUERY_LIMIT)
-      .get(),
-    adminDb
-      .collection(RP.results)
-      .where("schoolId", "==", schoolId)
-      .select("academicSession", "submittedAtMs")
-      .limit(QUERY_LIMIT)
-      .get(),
-  ]);
-
-  const tally = new Map<string, { count: number; lastUsedAt: number | null }>();
-
-  const record = (session: unknown, at: number | null) => {
-    if (typeof session !== "string" || session === "") return;
-    const current = tally.get(session) ?? { count: 0, lastUsedAt: null };
-    tally.set(session, {
-      count: current.count + 1,
-      lastUsedAt:
-        at === null ? current.lastUsedAt : Math.max(current.lastUsedAt ?? 0, at),
-    });
-  };
-
-  for (const doc of exams.docs) {
-    const data = doc.data();
-    // Firestore Timestamp on exams; results carry epoch ms instead.
-    const createdAt = data.createdAt;
-    const at =
-      createdAt && typeof createdAt.toMillis === "function"
-        ? (createdAt.toMillis() as number)
-        : null;
-    record(data.academicSession, at);
-  }
-
-  for (const doc of results.docs) {
-    const data = doc.data();
-    const at = typeof data.submittedAtMs === "number" ? data.submittedAtMs : null;
-    record(data.academicSession, at);
-  }
-
-  return sortSessionsDescending([...tally.keys()]).map((session) => {
-    // Present because the key came from the map's own keys.
-    const entry = tally.get(session) as { count: number; lastUsedAt: number | null };
-    return { session, count: entry.count, lastUsedAt: entry.lastUsedAt };
-  });
 }

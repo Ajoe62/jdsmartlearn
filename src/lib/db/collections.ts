@@ -165,12 +165,10 @@ export const JD = {
   /**
    * Per-school assessment settings, one document at `{schoolId}`.
    *
-   * A STOPGAP. It holds the current academic term and session, which are
-   * ResultPeak concepts that ResultPeak does not record anywhere: terms are a
-   * hardcoded array in their frontend, sessions are free text with a date
-   * default, and nothing marks which is current. ResultPeak should own this
-   * field eventually. Read it only through `getCurrentTermSession()` in
-   * `db/school-settings.ts`, so moving the source is a one-file change.
+   * Holds `lmsAssessmentType`, the admin's report-card column, read only through
+   * `getColumnSetting()`. Its old `term` and `session` fields are RETIRED as of
+   * 2026-11-26 and unread: the current term is ResultPeak's School profile,
+   * read through `getCurrentTermSession()`.
    */
   schoolSettings: "jdSchoolSettings",
   /**

@@ -2,7 +2,7 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { JD, SHARED } from "./collections";
 import { assertRecordFields, assertWritable } from "./write-guard";
-import { getCurrentTermSession } from "./school-settings";
+import { getColumnSetting } from "./school-settings";
 import { getSchool } from "./resultpeak";
 import {
   caScoreId,
@@ -171,7 +171,7 @@ export async function syncContinuousAssessment(entry: {
   percentage: number;
   submissionCount: number;
 }): Promise<CaSyncOutcome> {
-  const settings = entry.assessmentTypeId ? null : await getCurrentTermSession(entry.schoolId);
+  const settings = entry.assessmentTypeId ? null : await getColumnSetting(entry.schoolId);
 
   /**
    * Re-check against the school document every time, not against the setting

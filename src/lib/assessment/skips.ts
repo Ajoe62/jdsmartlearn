@@ -60,7 +60,7 @@ export const SKIP_ORDER: SkipReason[] = [
 export interface SchoolSkipInput {
   /** From `gradingEnabled()`. Read server-side; never inferred in a browser. */
   gradingEnabled: boolean;
-  /** The school's `jdSchoolSettings` document, or null when it has none. */
+  /** The admin's column setting, or null when the school has no current term set. */
   settings: { lmsAssessmentType: string | null } | null;
   /** The stable `value` of each type on `schools/{id}.assessmentTypes`. */
   knownAssessmentTypeIds: string[];

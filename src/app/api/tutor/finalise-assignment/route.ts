@@ -11,7 +11,7 @@ import { getProgress, progressId, upsertProgress } from "@/lib/db/progress";
 import { syncContinuousAssessment } from "@/lib/db/academic-records";
 import type { CaSyncOutcome } from "@/lib/db/academic-records";
 import { writeAuditLog } from "@/lib/db/lessons";
-import { getCurrentTermSession } from "@/lib/db/school-settings";
+import { getColumnSetting } from "@/lib/db/school-settings";
 import { caColumnOf, marksForColumn } from "@/lib/assessment/ca";
 import type { AssignmentSubmission } from "@/types/student-dashboard";
 
@@ -132,14 +132,14 @@ export async function POST(req: Request) {
         submission.term,
         submission.session
       ),
-      getCurrentTermSession(submission.schoolId),
+      getColumnSetting(submission.schoolId),
     ]);
     /**
      * Only the marks that land in THIS mark's report-card column. Older
      * assignments with no column of their own land in the admin's column, so
      * they share an average with newer assignments that chose that same column.
      */
-    const adminColumn = settings?.lmsAssessmentType ?? null;
+    const adminColumn = settings.lmsAssessmentType;
     const withThisOne = marksForColumn(
       replaceOrAppend(finalised, {
         ...submission,

@@ -52,6 +52,43 @@ export function isKnownTerm(term: string): boolean {
   return (RESULTPEAK_TERMS as readonly string[]).includes(term);
 }
 
+/**
+ * A session as ResultPeak's School profile saves it: two consecutive years with
+ * a slash, "2026/2027". Checked as written, never repaired: "2026-27" or
+ * " 2026/2027" is refused, not tidied.
+ */
+export function isProfileSession(session: string): boolean {
+  const m = /^(\d{4})\/(\d{4})$/.exec(session);
+  return m !== null && Number(m[2]) === Number(m[1]) + 1;
+}
+
+/** The school's current term and session, as ResultPeak's School profile holds them. */
+export interface SchoolCalendar {
+  term: AcademicTerm;
+  session: AcademicSession;
+}
+
+/**
+ * Read `schools/{id}.currentTerm` and `.currentSession`, the fields ResultPeak's
+ * School profile saves. The mirror of ResultPeak's `resolveSchoolCalendar()` in
+ * `src/lib/academicCalendar.js`, and it must stay one: both products have to
+ * name the same current term, or a mark stamped here is filed under a different
+ * term over there.
+ *
+ * BOTH OR NEITHER. If either is missing or not exactly valid, the school has not
+ * set its term, and the answer is null. Never one field without the other, never
+ * a tidied string, never a term worked out from the date.
+ */
+export function resolveSchoolCalendar(
+  school: { currentTerm?: unknown; currentSession?: unknown } | null | undefined
+): SchoolCalendar | null {
+  const term = school?.currentTerm;
+  const session = school?.currentSession;
+  if (typeof term !== "string" || !isKnownTerm(term)) return null;
+  if (typeof session !== "string" || !isProfileSession(session)) return null;
+  return { term, session };
+}
+
 /** Exact membership against the school's own observed sessions. */
 export function isKnownSession(session: string, knownSessions: readonly string[]): boolean {
   return knownSessions.includes(session);

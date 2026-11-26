@@ -24,7 +24,7 @@ import {
   type ClaimedFile,
 } from "@/lib/storage/uploads";
 import { getCurrentTermSession } from "@/lib/db/school-settings";
-import { isKnownSession, isKnownTerm } from "@/lib/academic-calendar";
+import { isKnownSession, isKnownTerm, termOrder } from "@/lib/academic-calendar";
 import { ASSIGNMENT_TYPES } from "@/types/student-dashboard";
 import { isTeacherMarkedColumn } from "@/lib/assessment/ca";
 import type { AssignmentType } from "@/types/student-dashboard";
@@ -148,7 +148,7 @@ export async function POST(req: Request) {
   const settings = await getCurrentTermSession(session.schoolId);
   if (!settings) {
     return bad(
-      "Your school admin has not set the current term and session yet. Ask them to open Assessment settings.",
+      "Your school has not set the current term yet. Ask a school admin to set it in ResultPeak, under School profile.",
       409
     );
   }
@@ -163,7 +163,16 @@ export async function POST(req: Request) {
     typeof academicSession !== "string" ||
     !isKnownSession(academicSession, settings.knownSessions)
   ) {
-    return bad("Choose a session your school uses.");
+    return bad(`New work counts towards the current session, ${settings.session}.`);
+  }
+  /**
+   * The current term or a later one in the same session. A later term is
+   * scheduled work, and ResultPeak holds its marks until the school reaches
+   * that term. An EARLIER term is refused: new work for a term that is over
+   * would reach a report card that may already be published.
+   */
+  if (termOrder(term) < termOrder(settings.term)) {
+    return bad(`${term} is over. Choose ${settings.term} or a later term.`);
   }
 
   /**

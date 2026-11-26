@@ -29,7 +29,7 @@ export type PurgeScope =
   | { kind: "schoolIdField" }
   /**
    * The document id IS the schoolId, so one `get()` replaces a query. Cheaper
-   * and exact. `saveSchoolSettings` does also write a `schoolId` field, so a
+   * and exact. `saveColumnSetting` does also write a `schoolId` field, so a
    * query would work today - but the id is the contract and the field is a
    * convenience, and a purge should key on the contract.
    */

@@ -107,8 +107,9 @@ export default async function NewAssignmentPage({
         <div className="mt-6 rounded-lg border border-line bg-surface p-4">
           <p className="font-medium">Your school has not set the current term yet</p>
           <p className="mt-1 text-muted">
-            A school admin needs to choose the current term and session before work
-            can be set. Until then, marks would not reach any report card.
+            A school admin needs to set the current term and session in ResultPeak,
+            under School profile, before work can be set. Until then, marks would
+            not reach any report card.
           </p>
           {session.isAdmin && (
             <Link

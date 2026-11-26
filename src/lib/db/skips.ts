@@ -1,5 +1,6 @@
 import "server-only";
-import { getCurrentTermSession } from "./school-settings";
+import { getColumnSetting } from "./school-settings";
+import { resolveSchoolCalendar } from "@/lib/academic-calendar";
 import { getSchool } from "./resultpeak";
 import { gradingEnabled } from "./grading-sweep";
 import { detectSkips } from "@/lib/assessment/skips";
@@ -25,10 +26,10 @@ import type { AdminColumnInfo } from "@/lib/assessment/ca";
  * than only on the one page somebody happened to open.
  */
 export async function getSchoolSkips(schoolId: string): Promise<SkipReason[]> {
-  const [settings, school] = await Promise.all([
-    getCurrentTermSession(schoolId),
-    getSchool(schoolId),
-  ]);
+  const [column, school] = await Promise.all([getColumnSetting(schoolId), getSchool(schoolId)]);
+  // No current term in ResultPeak's School profile reads as `no_settings`. The
+  // same rule as getCurrentTermSession(), on the school document already read.
+  const settings = resolveSchoolCalendar(school as Record<string, unknown> | null) ? column : null;
 
   /**
    * The school's list is re-read every time rather than trusted from the

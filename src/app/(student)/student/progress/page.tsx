@@ -3,7 +3,7 @@ import { getStudentSession } from "@/lib/auth/student";
 import { getClassSyncIndex } from "@/lib/db/student-content";
 import { listProgressForStudent } from "@/lib/db/progress";
 import { getAcademicRecord } from "@/lib/db/academic-records";
-import { getCurrentTermSession } from "@/lib/db/school-settings";
+import { getColumnSetting } from "@/lib/db/school-settings";
 import { linkTopics } from "@/lib/db/submissions";
 import { listVisibleLessonsForClass } from "@/lib/db/lessons";
 import ProgressView from "@/components/student/ProgressView";
@@ -35,7 +35,7 @@ export default async function StudentProgressPage() {
      * for term or session: those are stamped on each submission and never
      * resolved at read time.
      */
-    getCurrentTermSession(session.schoolId),
+    getColumnSetting(session.schoolId),
   ]);
 
   /**
